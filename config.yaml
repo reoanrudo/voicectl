@@ -1,0 +1,253 @@
+# voicectl 設定ファイル（トレイの「設定」からも編集できます。変更の反映には再起動が必要）
+version: 1                      # 設定の形式の版。配布時の移行チェックに使います
+
+hotkeys:
+  push_to_talk: f5              # 押している間だけ聞き取る（right_ctrl, f13, scroll_lock なども可）
+  emergency_stop: pause         # 緊急停止（保留中の確認・ヒント表示・押しっぱなしのマウスをすべて解除）
+  suppress_push_to_talk: true   # 押下中のキーを他のアプリに渡さない（Ctrl+クリック等の誤爆防止）
+
+# 聞き取り方
+listen:
+  auto_segment: true            # 言葉が途切れたら、F5 を離すのを待たずにその場で実行する
+  silence_sec: 0.6              # 何秒途切れたら 1 つの命令とみなすか（0.4 では息継ぎで命令が切れていた）
+  tap_for_continuous: true      # F5 を短くタップすると常時聞き取りモード（もう一度タップで終了）
+  tap_sec: 0.3                  # これより短い押下をタップとみなす
+
+# アラーム（時刻を指定するもの。「5分後に知らせて」のタイマーは内部の仕組みのまま）
+alarm:
+  use_clock_app: true           # Windows 標準のクロックアプリに設定する（失敗時は内部タイマーで代用）
+                                # 設定したアラームは名前「voicectl」でクロックアプリの一覧に出る
+
+# 配置のひな形（「開発の配置」で一気に並べる。app は窓のタイトルやプロセス名に含まれる言葉）
+layouts:
+  開発:
+    - app: ZCode
+      place: left_half
+    - app: Brave
+      place: right_half
+  資料:
+    - app: Obsidian
+      place: left_half
+    - app: Chrome
+      place: right_half
+
+# ウェイクワード（待機中に声をかけるだけで聞き取りを始める）
+wake_word:
+  enabled: false                # 2026-09-22 試したところ F5 の反応が悪化したため無効化。トレイからも切り替え可
+  words: ["コンピューター"]      # どれか 1 つを含む発話で開始。「ヘイパソコン」などにも変えられる
+  level: 0.02                   # これ以上の音量を話し声とみなす（反応しないときは下げる）
+  probe_silence_sec: 1.2        # 待機中の発話を、何秒静かになったら確認するか
+  min_interval_sec: 2.0         # 確認と確認の最少間隔（周囲の音で忙しくならないように）
+  session_idle_sec: 12          # 開始後、何秒無音が続いたら待機に戻るか
+
+audio:
+  device: "Microphone (Microphone)"   # null で既定デバイス。デバイス名の一部（例: "Seiren"）でも指定可
+  sample_rate: 16000
+  min_duration_sec: 0.25        # これより短い押下は無視
+
+stt:
+  model: large-v3-turbo
+  gpu_name: "4080"              # この名前を含む GPU だけを使う。3060 は PCIe の BusReset でクラッシュの起点になったため使わない（2026-09-22）
+  compute_type: int8_float16   # float16 と同精度で約1割速い（実測）
+  language: ja
+  beam_size: 1
+
+decision:
+  engine: jev                   # jev | keyword
+  fallback_to_keyword: true     # Jev の呼び出しに失敗したらキーワードエンジンで処理
+  fast_path: true               # 「右」「クリック」など単純な命令は Jev を通さず即実行
+  jev:
+    endpoint: https://api.typesafe.ai/v1/systemone
+    model: jev-latest
+    api_key_env: TYPESAFE_API_KEY
+    timeout_sec: 3.0
+    max_app_candidates: 250     # カタカナで言っても英語名のアプリを選べるよう、ほぼ全件を Jev に渡す
+    max_element_candidates: 120
+    max_window_candidates: 40
+  # Jev で決まらなかった発話だけ LLM に問い直す（プロンプトは .opencode/agents/voicectl-fallback.md）
+  # 既定はこの PC のローカル LLM（Ternary Bonsai 2 27B / llama.cpp）。ネットに出ず、速く、無料。
+  # backend: opencode にすると従来どおり opencode 経由（model に deepseek/deepseek-flash など）で呼ぶ。
+  llm_fallback:
+    enabled: true                # 2026-09-22 DeepSeek（opencode 経由）で有効化。発話と画面の候補名が DeepSeek に送られる
+    backend: opencode            # local = llama-server（OpenAI 互換） / opencode
+    model: deepseek/deepseek-v4-flash   # 実測 4〜6 秒。local に戻すときは bonsai2-27b
+    agent: voicectl-fallback
+    local:
+      base_url: http://127.0.0.1:8080/v1   # この PC 以外は指定できない（発話を外に出さないため）
+      model: bonsai2-27b
+      timeout_sec: 10.0           # 長い複文は 3 秒前後。起動直後の 1 回目だけ遅いので余裕を持たせる
+      max_tokens: 512
+    timeout_sec: 12.0            # backend: opencode のときのタイムアウト（DeepSeek は 4〜6 秒）
+    cooldown_sec: 90             # 続けて失敗したら、この秒数だけ休んでから自動で再開する
+    max_plan_steps: 5            # 複合命令として許す最大の手数
+    max_text_len: 200            # 入力文字列（type_text）の長さ上限
+
+# 学習：解釈できた言い方を覚えて、次からは Jev も LLM も通さずに実行する（state/learned.json）
+learning:
+  enabled: true
+  path: state/learned.json
+  trust_at: 3                    # これだけ成功した言い方は確認なしで実行する
+  fuzzy: 0.86                    # 読みの骨格がこの割合以上似ていれば同じ言い方とみなす
+  max_entries: 500
+
+thresholds:
+  execute: 0.80                 # これ以上なら即実行
+  confirm: 0.50                 # これ以上なら確認、未満は聞き返し
+  confirm_timeout_sec: 8
+
+# 確率に関係なく必ず確認する操作
+always_confirm:
+  - type_text
+  - key_combo:close_tab
+  - key_combo:alt_f4
+  - window_control:close
+
+mouse:
+  step_px: { small: 25, medium: 120, large: 400 }
+  scroll_notches: { small: 2, medium: 5, large: 15 }
+
+screen:
+  use_uia: true
+  use_ocr: true
+  ocr_language: ja
+  grid_size: 3                  # 番号グリッドの分割数（3 なら 3x3）
+
+# 話し言葉の別名。キーはアプリ一覧の名前の一部、値は呼び方
+app_aliases:
+  "Google Chrome": [ブラウザ, クローム, グーグル]
+  "Microsoft Edge": [エッジ]
+  "メモ帳": [メモ, ノートパッド]
+  "電卓": [計算機]
+  "エクスプローラー": [フォルダ, ファイル]
+  "Visual Studio Code": [ブイエスコード, VSコード]
+
+# 読み替え辞書：認識した文の「読み」を「表記」に置き換える（カタカナ → 英語など）
+# カタカナの読みは単語の一部だけでは置き換えない（「パスワード」の「ワード」は Word にならない）
+# ここに書いた表記は音声認識のヒントにもなる
+dictionary:
+  クローム: Chrome
+  グーグル: Google
+  ユーチューブ: YouTube
+  ジーメール: Gmail
+  ギットハブ: GitHub
+  ブレイブ: Brave
+  エッジ: Edge
+  フォトショップ: Photoshop
+  イラストレーター: Illustrator
+  エクセル: Excel
+  パワーポイント: PowerPoint
+  ディスコード: Discord
+  スラック: Slack
+  # ズーム: Zoom は「ズームして（拡大）」まで Zoom に置き換えてしまうため外した（Zoom 未インストール、2026-09-22）
+  クロード: Claude
+  コンフィーユーアイ: ComfyUI
+  ブイエスコード: Visual Studio Code
+  ビジュアルスタジオコード: Visual Studio Code
+  オブシリアン: Obsidian
+  ノーション: Notion
+  # サイト名（「〜を開いて」「〜で検索して」で使う）
+  ネットフリックス: Netflix
+  ネットフリクス: Netflix
+  ネトフリ: Netflix
+  スポティファイ: Spotify
+  スポチファイ: Spotify
+  ヤフー: Yahoo
+  やふー: Yahoo
+  プライムビデオ: Prime Video
+  ユーチューブミュージック: YouTube Music
+  ニコニコ動画: ニコニコ
+  キータ: Qiita
+  グーグルドライブ: Google ドライブ
+  グーグルフォト: Google フォト
+  グーグルカレンダー: Google カレンダー
+  グーグルドキュメント: Google ドキュメント
+  グーグルスプレッドシート: Google スプレッドシート
+
+# 音声認識に覚えさせたい固有名詞・専門用語（聞き間違いやすい単語を足していく）
+vocabulary:
+  - Jev
+  - voicectl
+  - Windows
+  - PioSolver
+  - Obsidian
+  - Notion
+  - Visual Studio Code
+  - Netflix
+  - Spotify
+  - Prime Video
+  - YouTube Music
+  - メルカリ
+  - 楽天
+  - ニコニコ
+  - ネットフリックス
+  - スポティファイ
+  - ヤフー
+  - Qiita
+  - Zenn
+  - MiniMax
+
+overlay:
+  corner: bottom_right          # top_left | top_right | bottom_left | bottom_right
+  font_px: 22                   # 状態カプセルの大きさ（全体がこれに比例する）
+  margin_px: 16                 # 作業領域（タスクバーを除いた範囲）からの余白
+  avoid_taskbar: true           # OS が返す作業領域を使う（タスクバーの高さ・拡大表示・2 段でも重ならない）
+  animate: true                 # 波形・走査線・フェードイン（聞き取り中と処理中だけ動かす）
+
+# 未知の目的：1 手の判定で決まらない命令を、Jev に 1 手ずつ選ばせて進める
+agent:
+  enabled: true
+  max_steps: 12                 # 最大の手数
+  max_seconds: 90               # 最大の時間
+
+# ブラウザをマイクにする（Mac / iPhone のブラウザで開き、押している間の声を PC に送る）
+# リモートデスクトップのマイク転送が使えないときに使う。URL はトレイメニューからコピーできる
+remote_mic:
+  enabled: true
+  port: 8765
+
+# 画面上部の文字起こしバー
+transcript:
+  enabled: true                 # 右下（状態表示の上）に表示
+  live_partial: true            # 話している最中も約1秒ごとに途中経過を表示（確定が最大で約0.3秒遅れることがある）
+  partial_as_final: true        # 途中経過がほぼ全体をカバーしていれば、離したときの再認識を省く（初動が約0.35秒速くなる）
+  partial_interval_sec: 1.0
+  font_px: 18
+  width_ratio: 0                # 画面幅に対するバーの幅。0 で状態表示と同じ幅
+  history: 2                    # 過去の発話を何件表示するか
+
+# 音声返答（読み上げ）
+voice_reply:
+  enabled: false                # 2026-09-22 ユーザーの依頼で無効化。答えはカードに文字で表示する
+
+logging:
+  dir: logs                     # 発話・判定・遅延を JSONL で保存（しきい値の調整用）
+
+# 声での返事（Windows 標準の音声合成）。時刻・計算・読み上げ・タイマーなど、答えがある命令だけ話す
+voice_reply:
+  enabled: true
+  rate: 1                       # 話す速さ（-10〜10）
+
+# ルーチン：名前を言うと、並べた命令を順に実行する（声でも「〇〇と言ったら△△して」で登録できる。
+# 声で登録したものは state/routines.json に入る）
+routines:
+  作業開始:
+    - Obsidianを開いて
+    - Chromeを開いて
+    - 左にChrome右にObsidian
+
+# 「〇〇というファイルを開いて」：Windows Search の索引（ユーザーフォルダ）で探し、なければここを直接探す
+files:
+  extra_roots:
+    - 'S:\'
+
+# 動作確認用：127.0.0.1:8766 に文字で命令を送れる窓口（この PC の中からだけ接続できる）
+debug:
+  inbox: true
+  inbox_port: 8766
+
+# 文章アシスタント（DeepSeek・opencode 経由）：「〇〇のメールを書いて」「これを英語にして」「この画面を要約して」
+# 「〇〇って何？」「今日何した？」。依頼の文と、対象の文字（選択中の文・画面の文字・今日の操作の記録）が DeepSeek に送られる
+assistant:
+  enabled: true
+  model: deepseek/deepseek-v4-flash
+  timeout_sec: 40

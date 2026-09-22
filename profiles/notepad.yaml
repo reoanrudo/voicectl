@@ -1,0 +1,60 @@
+# メモ帳（notepad.exe）用プロファイル
+# ショートカットは Windows 11 のメモ帳を基準にしています。バージョンで違う場合はここを直してください。
+name: メモ帳
+
+match:
+  exe: [notepad]
+
+readings: [ノートパッド, ノートパッドエディタ]   # 「ノートパッド開いて」でも起動できる
+
+dictionary:
+  ワードラップ: 折り返し
+
+vocabulary:
+  - 折り返し
+
+commands:
+  上書き保存:
+    say: [上書き保存, 保存して]
+    do:
+      - keys: "Ctrl+S"
+  名前を付けて保存:
+    say: [名前を付けて保存, 別名で保存]
+    do:
+      - keys: "Ctrl+Shift+S"
+  折り返し:
+    say: [折り返し, ワードラップ, 折り返して, 折り返しを切り替え]
+    do:
+      - keys: "Alt+Z"
+  拡大:
+    say: [拡大, ズームイン, 大きく表示して]
+    do:
+      - keys: "Ctrl+Plus"
+  縮小:
+    say: [縮小, ズームアウト, 小さく表示して]
+    do:
+      - keys: "Ctrl+Minus"
+  等倍に戻して:
+    say: [等倍に戻して, ズームを戻して, 標準の大きさ]
+    do:
+      - keys: "Ctrl+0"
+  時刻と日付を挿入:
+    say: [時刻を入れて, 日付を入れて, 今の時間を入れて]
+    do:
+      - keys: "F5"
+  新規作成:
+    say: [新規作成, 新しいメモ, 新しく書く]
+    do:
+      - keys: "Ctrl+N"
+  行へ移動:
+    say: [行へ移動, 指定の行へ]
+    do:
+      - keys: "Ctrl+G"
+  検索:
+    say: [検索, 探して, 単語を探して]
+    do:
+      - keys: "Ctrl+F"
+  置換:
+    say: [置換, 置き換え]
+    do:
+      - keys: "Ctrl+H"

@@ -1,0 +1,58 @@
+# エクスプローラー（explorer.exe）用プロファイル
+name: エクスプローラー
+
+match:
+  exe: [explorer]
+
+readings: [エクスプローラー, エクスプローラ, ファイルエクスプローラー]   # 「エクスプローラ開いて」でも起動できる
+
+dictionary:
+  ナビゲーションウィンドウ: ナビウィンドウ
+
+vocabulary:
+  - ナビゲーションウィンドウ
+  - プレビューウィンドウ
+  - 詳細表示
+
+commands:
+  新しいフォルダ:
+    say: [新しいフォルダ, 新規フォルダ, フォルダを作って]
+    do:
+      - keys: "Ctrl+Shift+N"
+  名前を変更:
+    say: [名前を変更, 名前の変更, リネーム]
+    do:
+      - keys: "F2"
+  上の階層へ:
+    say: [上の階層へ, 親フォルダへ, 一つ上に戻って]
+    do:
+      - keys: "Alt+Up"
+  新しいタブ:
+    say: [新しいタブ, 別のフォルダを開いて]
+    do:
+      - keys: "Ctrl+T"
+  新規ウィンドウ:
+    say: [新規ウィンドウ, 新しいウィンドウで開いて]
+    do:
+      - keys: "Ctrl+N"
+  詳細表示:
+    say: [詳細表示, リストにして, 一覧にして]
+    do:
+      - keys: "Ctrl+Shift+6"
+  大きいアイコン:
+    say: [大きいアイコン, アイコンを大きく]
+    do:
+      - keys: "Ctrl+Shift+2"
+  プロパティ:
+    say: [プロパティ, 詳細を見せて]
+    do:
+      - keys: "Alt+Enter"
+  パスをコピー:
+    say: [パスをコピー, 場所をコピー]
+    do:
+      - keys: "Ctrl+Shift+C"
+  削除:
+    say: [削除して, ゴミ箱に入れて]
+    confirm: true
+    do:
+      - keys: "Delete"

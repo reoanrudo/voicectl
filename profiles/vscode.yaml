@@ -1,0 +1,82 @@
+# Visual Studio Code（Code.exe）用プロファイル
+# エディタの操作を音声で。コマンドパレット経由の操作は「menu」ではなく手順で書ける（text → Enter）
+name: Visual Studio Code
+
+match:
+  title: [Visual Studio Code]
+
+readings: [ブイエスコード, ビジュアルスタジオコード, ブイエスコーデ]   # スタートメニューの表記に合わせる
+
+dictionary:
+  コマンドパレット: パレット
+  サイドバー: サイドバー
+
+vocabulary:
+  - コマンドパレット
+  - ターミナル
+  - サイドバー
+  - マークダウン
+
+commands:
+  コマンドパレット:
+    say: [コマンドパレット, パレットを開いて]
+    do:
+      - keys: "Ctrl+Shift+P"
+  ファイルを開く:
+    say: [ファイルを開いて, クイックオープン, ファイル検索]
+    do:
+      - keys: "Ctrl+P"
+  全文検索:
+    say: [全文検索, プロジェクト内を検索, 全体から探して]
+    do:
+      - keys: "Ctrl+Shift+F"
+  置換:
+    say: [置換, 置き換え]
+    do:
+      - keys: "Ctrl+H"
+  サイドバーを隠して:
+    say: [サイドバーを隠して, サイドバーを閉じて, エクスプローラーを隠して]
+    do:
+      - keys: "Ctrl+B"
+  ターミナル:
+    say: [ターミナル, ターミナルを開いて, コンソールを出して]
+    do:
+      - keys: "Ctrl+Shift+P"
+      - wait: 0.4
+      - text: "Toggle Terminal"
+      - keys: "Enter"
+  折り返し:
+    say: [折り返し, ワードラップ, 折り返して]
+    do:
+      - keys: "Alt+Z"
+  行を複製:
+    say: [行を複製, この行をコピー]
+    do:
+      - keys: "Shift+Alt+Down"
+  コメントアウト:
+    say: [コメントアウト, コメントにして, コメントを外して]
+    do:
+      - keys: "Ctrl+/"
+  保存:
+    say: [保存して, 上書き保存]
+    do:
+      - keys: "Ctrl+S"
+  すべて保存:
+    say: [すべて保存, 全部保存]
+    do:
+      - keys: "Ctrl+Shift+P"
+      - wait: 0.4
+      - text: "Save All"
+      - keys: "Enter"
+  整形:
+    say: [整形して, フォーマットして, コードを整えて]
+    do:
+      - keys: "Shift+Alt+F"
+  定義へ移動:
+    say: [定義へ移動, 定義を見せて]
+    do:
+      - keys: "F12"
+  元に戻す:
+    say: [元に戻す, アンドゥ]
+    do:
+      - keys: "Ctrl+Z"

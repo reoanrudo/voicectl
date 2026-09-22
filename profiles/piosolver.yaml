@@ -1,0 +1,188 @@
+# PioSolver（画面は PioViewer3）用プロファイル（PioViewer が前面にあるときだけ有効）
+name: PioSolver PioViewer3
+
+match:
+  exe: [pioviewer, piosolver]   # 実行ファイル名の一部（PioViewer3.exe など）
+  title: [PioViewer, PioSOLVER]  # ウィンドウタイトルの一部
+
+# スタートメニューに登録されていないので、起動パスを書く（PioSOLVER3-pro.exe は計算エンジンで、画面は PioViewer）
+launch: C:\PioSOLVER\PioViewer3.exe
+
+# アプリ名の読み（どのアプリが前面でも有効。「ピオソルバー開いて」で起動）
+readings: [ピオソルバー, ピオソルバ, ピオビューワー, ピオビューアー, ピオビュワー, ピオ]
+
+# PioSolver が前面のときだけ使う読み替え
+dictionary:
+  インポジション: IP
+  アウトオブポジション: OOP
+  ジーティーオー: GTO
+  イーブイ: EV
+  オーオーピー: OOP
+  アイピー: IP
+  ビービー: BB
+  エスビー: SB
+  ビーティーエヌ: BTN
+  ユーティージー: UTG
+  シーオー: CO
+  エイチジェイ: HJ
+  シービー: CB
+  シーベット: Cベット
+
+# PioSolver が前面のときだけ足す、音声認識のヒント（ポーカー用語）
+vocabulary:
+  - PioSolver
+  - フロップ
+  - ターン
+  - リバー
+  - プリフロップ
+  - ボード
+  - レンジ
+  - ハンド
+  - ベット
+  - チェック
+  - コール
+  - レイズ
+  - フォールド
+  - オールイン
+  - ドンクベット
+  - ポット
+  - スタック
+  - エクイティ
+  - EV
+  - GTO
+  - ノードロック
+  - ツリー
+  - ソルブ
+  - ストラテジー
+  - IP
+  - OOP
+  - ハンドマトリクス
+
+# 独自コマンド（言い方 → 手順）。PioSolver のメニューを「このアプリを覚えて」で読み取れば、
+# メニューにある操作はここに書かなくても声で実行できる。メニューにない操作や、複数手順の操作をここに書く。
+#
+# 手順に書けるもの：
+#   - keys: "Ctrl+B"          キー操作（F5, Alt+Enter, Ctrl+Shift+S など）
+#   - menu: [Tree, Build tree]  メニューを順にたどって実行
+#   - click: "Solve"          画面上のボタンなどを名前でクリック
+#   - text: "AsKd7h"          文字を入力
+#   - wait: 0.5               秒数だけ待つ
+# confirm: true を付けると、実行前に必ず確認する
+commands: {}
+#  ソルブ開始:
+#    say: [ソルブして, 計算開始, 解いて]
+#    do:
+#      - click: "Go"
+#  ボード入力:
+#    say: [ボードを入力]
+#    do:
+#      - click: "Board"
+#      - wait: 0.3
+
+# メニュー項目の日本語の言い方（PioViewer のメニューは英語のため）。キーは「このアプリを覚えて」で記録した
+# メニューのパス（cache/appmaps/pioviewer3.exe.json の path を " > " でつないだもの）と完全に一致させる。
+# 言い方と完全に一致すれば即実行、近い言い方なら Jev がこれを手がかりに選ぶ。
+menu_aliases:
+  "File > Load tree": [ツリーを読み込んで, ツリーを開いて, ツリー読み込み, ファイルを開いて]
+  "File > Save full tree": [ツリーを保存, フルツリーを保存, フルで保存]
+  "File > Save small tree(without rivers, recommended)": [小さいツリーで保存, スモールツリーで保存, リバーなしで保存]
+  "File > Save very small tree(only flops cached)": [最小のツリーで保存, フロップだけ保存]
+  "File > Load other tree in the same folder": [同じフォルダの別のツリー, 別のツリーを開いて, 次のツリー]
+  "File > Open directory with current save": [保存フォルダを開いて, 保存先を開いて]
+  "File > Open current tree in another PioViewer": [別のPioViewerで開いて]
+  "Solver > Connect": [ソルバーに接続, ソルバー接続, 接続して, ソルバーにつないで]
+  "Solver > Disconnect": [ソルバーを切断, 切断して]
+  "Solver > Reconnect": [ソルバーに再接続, 再接続]
+  "Solver > Benchmark": [ベンチマーク]
+  "Tools > Select Range": [レンジを選択, レンジ選択, レンジを選んで]
+  "Tools > Configuration": [設定を開いて, コンフィグ]
+  "Tools > Keyboard Shortcuts Configuration": [ショートカットの設定, キーボードショートカット]
+  "Tools > Paste tree building config from clipboard": [ツリー設定を貼り付け]
+  "Tools > Show > Clone current view in new window": [別ウィンドウで表示, ビューを複製]
+  "Tools > Show > Range OOP": [OOPのレンジ, OOPレンジ, OOPのレンジを表示]
+  "Tools > Show > Range IP": [IPのレンジ, IPレンジ, IPのレンジを表示]
+  "Tools > Show > Equity OOP": [OOPのエクイティ, OOPエクイティ]
+  "Tools > Show > Equity IP": [IPのエクイティ, IPエクイティ]
+  "Tools > Show > EV OOP": [OOPのEV, OOPのEVを見せて, OOPのEVを表示]
+  "Tools > Show > EV IP": [IPのEV, IPのEVを見せて, IPのEVを表示]
+  "Tools > Show > Strategy": [戦略を表示, 戦略, ストラテジー, ストラテジーを表示]
+  "Tools > Show > Strategy + EV": [戦略とEV, ストラテジーとEV]
+  "Tools > Show > Strategy + Reaction": [戦略とリアクション]
+  "Tools > Show > Show Regrets": [リグレットを表示, リグレット]
+  "Tools > Show > MES": [MESを表示]
+  "Tools > Show > Blockers > Blockers OOP": [OOPのブロッカー]
+  "Tools > Show > Blockers > Blockers IP": [IPのブロッカー]
+  "Tools > Show > Blockers > Blockers Current Player": [今のプレイヤーのブロッカー, ブロッカー]
+  "Tools > Show > Blockers > Blockers Other Player": [相手のブロッカー]
+  "Tools > Show > Toggle one / two grids": [グリッドを切り替え, 1画面と2画面を切り替え]
+  "Tools > ICM Calculator": [ICM計算機, ICMカリキュレーター]
+  "Tools > Solver Job Execution Queue": [ジョブキュー, 実行キュー]
+  "Tools > GTO Trainer > Trainer V3": [トレーナー, GTOトレーナー, トレーナーを開いて, 練習モード, トレーニング, V3, トレーナーV3, V3トレーナー, 新しいトレーナー]
+  "Tools > GTO Trainer > Trainer V2 (2.0 - 3.5) discountinued": [V2, トレーナーV2, V2トレーナー, 古いトレーナー, 前の世代のトレーナー, 旧トレーナー]
+  "Tools > GTO Trainer > Trainer V3: Play current spot from start": [このスポットを最初から練習, 最初からトレーニング]
+  "Tools > GTO Trainer > Trainer V3: Play from current node": [このノードから練習, ここからトレーニング]
+  "Tools > Generate Preflop Charts from current solution": [プリフロップチャートを作成, プリフロップチャート]
+  "Tools > Refresh tree in the browser": [ツリーを更新, ツリーをリフレッシュ]
+  "Tools > Load Script": [スクリプトを読み込んで]
+  "Tree > Set strategy and lock node": [ノードロック, ノードロックして, ノードをロック, 戦略を設定してロック, ロックかけて, ロックして]
+  "Tree > Adjust incentives in current line (player profiling)": [インセンティブを調整]
+  "Tree > Lock all nodes of current player in all parent nodes.": [親ノードを全部ロック]
+  "Tree > Clear all locks from the tree.": [ロックを全部解除, ロックを全部解除して, 全ロック解除, ロック解除]
+  "Tree > Clear all incentives from the tree.": [インセンティブを全部解除]
+  "Tree > Round Strategies": [戦略を丸めて, 戦略を丸める, 丸めて, ラウンドして]
+  "Tree > Eliminate currently selected path from player's strategy": [この選択肢を消して, このラインを除外]
+  "Tree > Reset strategies in the tree": [戦略をリセット, ストラテジーをリセット]
+  "Tree > Solve from here (partial tree solve)": [ここからソルブ, ここから解いて, 部分ソルブ, ここから計算, ここから計算して]
+  "Tree > Load All Nodes": [全ノードを読み込んで]
+  "Tree > Change Rake Structure in Current Tree": [レーキを変更]
+  "Tree > Change displayed suits on current board": [スートを変更, 表示スートを変えて]
+  "Tree > Navigate to Child / Parent > Navigate to the root node (start of the tree)": [ルートノードに戻って, ルートに戻って, 最初に戻って, ツリーの最初]
+  "Tree > Navigate to Child / Parent > Navigate to parent node": [親ノードに戻って, 親ノード, 一つ戻って, 前のノード, 一個前のノードに戻って, 一個前に戻って, 前のノードに戻って]
+  "Tree > Navigate to Child / Parent > Navigate to child node 1 - the action with the highest chip amount (allin or highest raise etc.)": [子ノード1, 一番大きいアクション, オールインの方, オールインのラインに進んで, オールインに進んで]
+  "Tree > Navigate to Child / Parent > Navigate to child node 2": [子ノード2]
+  "Tree > Navigate to Child / Parent > Navigate to child node 3": [子ノード3]
+  "Tree > Navigate to Child / Parent > Navigate to child node 4": [子ノード4]
+  "Tree > Navigate to Child / Parent > Navigate to child node 5": [子ノード5]
+  "Tree > Navigate to Child / Parent > Navigate to child node 6": [子ノード6]
+  "Tree > Navigate to Child / Parent > Navigate to child node 7": [子ノード7]
+  "Tree > Navigate to Child / Parent > Navigate to child node 8": [子ノード8]
+  "Tree > Navigate to Child / Parent > Navigate to child node 9 - the action with the lowest chip amount (usually fold or check)": [子ノード9, 一番小さいアクション, フォールドかチェックの方]
+  "Tree > Navigate to any node > Navigate to node by node_id": [ノードIDで移動]
+  "Favorites > Configure Favorites": [お気に入りの設定]
+
+# 画面のボタン・タブ・チェックボックスの日本語の言い方。キーは次のどれか：
+#   "名前"            例: "Board"
+#   "名前#AutomationId" 同じ名前が複数あるとき（例: "EV#radio0" はチェックボックスの EV）
+#   "#AutomationId"    名前に記号が入るボタンなど（例: "#playSessionButton"）
+# 名前と AutomationId は「このアプリを覚えて」で cache/appmaps/pioviewer3.exe.json の controls に記録される
+control_aliases:
+  # メイン画面
+  "Board#boardButton": [ボード, ボードを入力, ボード設定, ボードを変えて]
+  "Pick#pickButton": [ピック, ハンドを選んで]
+  "Customize#customExpressionsButton": [フィルターのカスタマイズ]
+  "Browser": [ブラウザタブ, ツリーブラウザ]
+  "Postflop Tree Building and Calculations": [ツリー作成タブ, ツリー作成画面, ポストフロップのタブ]
+  "Preflop": [プリフロップタブ, プリフロップ画面]
+  "Tree information": [ツリー情報, ツリーの情報]
+  "Equity#radio1": [エクイティ表示に切り替え, エクイティに切り替え]
+  "EV#radio0": [EV表示に切り替え, EVに切り替え]
+  "OOP#radio1": [OOP表示に切り替え, OOPに切り替え, OOP側を表示]
+  "IP#radio0": [IP表示に切り替え, IPに切り替え, IP側を表示]
+  "Compare#button_1_1": [比較して, 比較表示]
+  "Normalize squares#normalizeRangeView": [正規化]
+  "Refresh on new selection#refreshViewOnNewSelectionCheckbox": [自動更新]
+  # GTO Trainer V3 画面
+  "#playSessionButton": [プレイ, プレイして, 練習開始, 練習スタート]
+  "#createNewSessionButton": [新しいセッション, セッションを作って, セッション作成]
+  "#cloneSessionButton": [セッションを複製, セッションのコピー]
+  "#showHHButton": [ハンド履歴, ハンドヒストリー]
+  "#editSessionButton": [スポットを編集, スポットの追加]
+  "#button1": [セッションを削除]
+  # GTO Trainer V2（Pio Trainer）画面
+  "#playThisPackButton": [プレイ, プレイして, このパックをプレイ, 練習開始]
+  "#addPackButton": [パックを追加, 新しいパック]
+  "#editPackButton": [パックを編集, パック情報を編集]
+  "#deletePackButton": [パックを削除]
+  "#loadAllHHFromThisBackPutton": [ハンド履歴を全部読み込んで, ハンドヒストリーを読み込んで]
+  "#moveUpButton": [上に移動, 一つ上へ]
+  "#moveDownButton": [下に移動, 一つ下へ]

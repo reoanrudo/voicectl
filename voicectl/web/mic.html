@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>voicectl マイク</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1b1d22; --muted: #6b7079; --line: #e2e4e8;
+    --idle: #4a4f59; --listening: #d23a47; --processing: #d98c1f; --done: #2b9a58; --confirm: #2f6fd1;
+    --retry: #7b5bb0; --error: #b52f2f; --hints: #1f7fa8; --paused: #7a7a7a; --result: #2b9a58;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121317; --panel: #1c1e24; --text: #eceef2; --muted: #9aa0aa; --line: #2c2f37; --result: #6fd79a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px; gap: 14px; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  header { width: 100%; max-width: 560px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  #conn { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  #conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--error); display: inline-block; }
+  #conn.on i { background: var(--done); }
+  .panel { width: 100%; max-width: 560px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  #state { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; }
+  #state b { width: 12px; height: 12px; border-radius: 50%; background: var(--idle); flex: none; }
+  #lines { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 1.2em; }
+  #said { font-size: 20px; font-weight: 600; min-height: 1.5em; word-break: break-all; }
+  #said.partial { font-weight: 400; font-style: italic; color: var(--muted); }
+  #result { color: var(--result); font-size: 15px; margin-top: 4px; min-height: 1.3em; }
+  #history { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  #history li { padding: 4px 0; border-top: 1px solid var(--line); }
+  #talk {
+    width: min(78vw, 300px); aspect-ratio: 1; border-radius: 50%; border: none;
+    background: var(--idle); color: #fff; font-size: 20px; font-weight: 700; line-height: 1.4;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); touch-action: none; cursor: pointer; position: relative;
+    transition: transform .08s, background .15s;
+  }
+  #talk.on { background: var(--listening); transform: scale(.96); }
+  #talk:disabled { opacity: .5; }
+  #talk small { display: block; font-size: 13px; font-weight: 400; opacity: .85; }
+  #meter { width: min(78vw, 300px); height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  #meter div { height: 100%; width: 0; background: var(--listening); transition: width .05s; }
+  #row { display: flex; gap: 10px; }
+  button.sub { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 10px; padding: 10px 16px; font-size: 15px; }
+  #stop { color: var(--error); border-color: var(--error); font-weight: 600; }
+  #help { font-size: 12px; color: var(--muted); text-align: center; max-width: 560px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>voicectl マイク</h1>
+  <span id="conn"><i></i><span id="connText">未接続</span></span>
+</header>
+
+<section class="panel">
+  <div id="state"><b></b><span id="stateText">待機中</span></div>
+  <div id="lines"></div>
+</section>
+
+<button id="talk">タップして<br>マイクを有効にする<small>（最初の 1 回だけ）</small></button>
+<div id="meter"><div></div></div>
+
+<section class="panel">
+  <div id="said" class="partial">ここに認識した文字が出ます</div>
+  <div id="result"></div>
+  <ul id="history"></ul>
+</section>
+
+<div id="row">
+  <button class="sub" id="stop">緊急停止</button>
+</div>
+<p id="help">声はこの端末のマイクから PC に送られ、PC 側で認識・操作します。<br>確認が出たら、もう一度押して「はい」または「いいえ」と話してください。</p>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const TARGET_SR = 16000;
+const PREROLL_MS = 300;
+const $ = (id) => document.getElementById(id);
+const talk = $("talk"), meter = $("meter").firstElementChild;
+
+let ws = null, audioCtx = null, pressed = false, micReady = false;
+let preroll = [];   // 押す直前の音声（頭切れ防止）
+let prerollLen = 0;
+
+// ---- WebSocket ----
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?t=${encodeURIComponent(TOKEN)}`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => {
+    $("conn").classList.add("on"); $("connText").textContent = "接続中";
+    if (micReady) send({ cmd: "ready" });
+  };
+  ws.onclose = () => {
+    $("conn").classList.remove("on"); $("connText").textContent = "再接続中…";
+    byButton = false;
+    stopSending();
+    setTimeout(connect, 1500);
+  };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+}
+const send = (obj) => ws && ws.readyState === 1 && ws.send(typeof obj === "string" ? obj : JSON.stringify(obj));
+
+// ---- PC からの通知 ----
+const history = [];
+let current = "", currentFinal = false, currentResult = "";
+function pushHistory() {
+  if (current && currentFinal) {
+    history.unshift(currentResult ? `${current}  → ${currentResult}` : current);
+    history.length = Math.min(history.length, 5);
+    $("history").innerHTML = history.map((h) => `<li>${esc(h)}</li>`).join("");
+  }
+}
+function esc(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function handle(m) {
+  const a = m.args;
+  if (m.kind === "ptt") {          // PC の F5 からの録音指示
+    if (a[0]) startSending(); else stopSending();
+    return;
+  }
+  if (m.kind === "status") {
+    const [state, title, lines] = a;
+    $("state").firstElementChild.style.background = `var(--${state}, var(--idle))`;
+    $("stateText").textContent = title;
+    $("lines").textContent = (lines || []).join(" ／ ");
+  } else if (m.kind === "transcript_partial" || m.kind === "transcript_final") {
+    pushHistory();
+    current = a[0]; currentFinal = m.kind === "transcript_final"; currentResult = "";
+    $("said").textContent = (currentFinal ? "" : "🎤 ") + current;
+    $("said").classList.toggle("partial", !currentFinal);
+    $("result").textContent = "";
+  } else if (m.kind === "transcript_result") {
+    currentResult = a[0];
+    $("result").textContent = "→ " + a[0];
+  }
+}
+
+// ---- マイク ----
+async function initMic() {
+  if (micReady) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(stream);
+    const code = `
+      class Tap extends AudioWorkletProcessor {
+        process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; }
+      }
+      registerProcessor("tap", Tap);`;
+    await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: "application/javascript" })));
+    const node = new AudioWorkletNode(audioCtx, "tap");
+    node.port.onmessage = (e) => onAudio(e.data);
+    src.connect(node);
+    micReady = true;
+    talk.innerHTML = "押している間<br>話す<small>PC の F5 でも話せます（このページは開いたままに）</small>";
+    send({ cmd: "ready" });
+    return true;
+  } catch (err) {
+    $("stateText").textContent = "マイクを使えません";
+    $("lines").textContent = explain(err);
+    return false;
+  }
+}
+
+function explain(err) {
+  const name = (err && err.name) || "";
+  const msg = (err && err.message) || String(err);
+  const isWindows = /Windows/.test(navigator.userAgent);
+  let hint;
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    hint = "暗号化された接続として扱われていません。URL が https:// で始まっているか確認してください";
+  } else if (name === "NotAllowedError" || name === "SecurityError") {
+    hint = "マイクの使用が拒否されています。アドレスバーのマイク／鍵のアイコンからこのサイトのマイクを「許可」にし、"
+         + "Mac なら「システム設定 > プライバシーとセキュリティ > マイク」でこのブラウザをオンにしてから再読み込みしてください";
+  } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+    hint = isWindows
+      ? "この端末にマイクが見つかりません。リモート接続先の PC のブラウザで開いていませんか？ 手元の Mac／iPhone のブラウザで開いてください"
+      : "この端末にマイクが見つかりません。マイクの接続を確認してください";
+  } else if (name === "NotReadableError" || name === "AbortError") {
+    hint = "マイクを他のアプリが使用中の可能性があります。Zoom などを閉じてから再読み込みしてください";
+  } else {
+    hint = "ブラウザを再読み込みしてもう一度試してください";
+  }
+  return `${hint}（${name || "エラー"}: ${msg}）`;
+}
+
+// 端末のサンプリング周波数から 16 kHz への線形補間での変換（呼び出しをまたいで位相を保つ）
+let resPos = 0, resLast = 0;
+function resample(x) {
+  const ratio = audioCtx.sampleRate / TARGET_SR;
+  // 前回の最後の 1 サンプルを先頭に足して、ブロックの境目でも補間できるようにする
+  const ext = new Float32Array(x.length + 1);
+  ext[0] = resLast; ext.set(x, 1);
+  const out = [];
+  let pos = resPos;
+  while (pos < ext.length - 1) {
+    const i = Math.floor(pos), f = pos - i;
+    out.push(ext[i] + (ext[i + 1] - ext[i]) * f);
+    pos += ratio;
+  }
+  resPos = pos - (ext.length - 1);
+  resLast = x[x.length - 1];
+  const pcm = new Int16Array(out.length);
+  for (let i = 0; i < out.length; i++) pcm[i] = Math.max(-1, Math.min(1, out[i])) * 0x7fff;
+  return pcm;
+}
+
+function onAudio(x) {
+  let sum = 0;
+  for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+  meter.style.width = Math.min(100, Math.sqrt(sum / x.length) * 1200) + "%";
+  const pcm = resample(x);
+  if (pressed) {
+    send(pcm.buffer);
+  } else {
+    preroll.push(pcm); prerollLen += pcm.length;
+    while (prerollLen - preroll[0].length > TARGET_SR * PREROLL_MS / 1000) prerollLen -= preroll.shift().length;
+  }
+}
+
+// ---- 押す・離す ----
+let byButton = false;  // このページのボタン／スペースで押しているか（F5 からの指示と区別）
+function startSending() {
+  if (pressed || !micReady) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  pressed = true;
+  talk.classList.add("on");
+  for (const p of preroll) send(p.buffer);
+  preroll = []; prerollLen = 0;
+}
+function stopSending() {
+  if (!pressed) return;
+  pressed = false;
+  talk.classList.remove("on");
+  meter.style.width = "0";
+}
+async function press() {
+  if (pressed) return;
+  if (!micReady) { await initMic(); return; }  // 最初のタップはマイクの有効化だけ
+  byButton = true;
+  send({ cmd: "down" });
+  startSending();
+}
+function release() {
+  if (!byButton) return;
+  byButton = false;
+  stopSending();
+  send({ cmd: "up" });
+}
+
+talk.addEventListener("pointerdown", (e) => { e.preventDefault(); talk.setPointerCapture(e.pointerId); press(); });
+talk.addEventListener("pointerup", release);
+talk.addEventListener("pointercancel", release);
+talk.addEventListener("contextmenu", (e) => e.preventDefault());
+document.addEventListener("keydown", (e) => { if (e.code === "Space" && !e.repeat) { e.preventDefault(); press(); } });
+document.addEventListener("keyup", (e) => { if (e.code === "Space") { e.preventDefault(); release(); } });
+window.addEventListener("blur", release);
+$("stop").addEventListener("click", () => send({ cmd: "stop" }));
+
+connect();
+</script>
+</body>
+</html>

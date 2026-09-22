@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# この PC の個人的な状態・機密（配布物には含めない）
+logs/
+state/
+cache/
+out/
+app_readings.yaml
+
+# 一時ファイル
+*.tmp
+*.log
+
+# 開発ツールの内部データ
+.mimosa/
+.video_agent/
+GTO
