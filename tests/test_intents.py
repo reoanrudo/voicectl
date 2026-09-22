@@ -278,6 +278,68 @@ def test_process_name_matches():
     assert not intents.process_name_matches("explorer.exe", "notepad")
 
 
+# ---- 2026-09-23 追加：窓一覧と配置の音声保存（このアプリらしい操作） ----
+@pytest.mark.parametrize("text,kind,args", [
+    ("窓一覧", "windows_list", {}),
+    ("ウィンドウの一覧を見せて", "windows_list", {}),
+    ("今の配置を開発として保存", "layout_save", {"name": "開発"}),
+    ("この配置を作業に保存して", "layout_save", {"name": "作業"}),
+    ("開発の配置を消して", "layout_del", {"name": "開発"}),
+])
+def test_parse_windows_and_layout(text, kind, args):
+    it = intents.parse(text)
+    assert it is not None and it.kind == kind, text
+    assert it.args == args, text
+
+
+@pytest.mark.parametrize("text", ["開発の配置", "配置一覧", "窓を閉じて"])
+def test_windows_layout_not_stolen(text):
+    """既存の言い方（配置の使用・一覧）を新しい機能が奪わないこと。"""
+    it = intents.parse(text, layouts={"開発": [{"app": "ZCode", "place": "left_half"}]})
+    if text == "開発の配置":
+        assert it.kind == "layout"   # 使用は従来どおり
+    elif text == "配置一覧":
+        assert it.kind == "layout_list"
+    else:
+        assert it is None, text
+
+
+def test_window_op():
+    """窓一覧モードの番号操作の解析。"""
+    assert intents.window_op("3番を左半分に") == (3, "left_half")
+    assert intents.window_op("2番を閉じて") == (2, "close")
+    assert intents.window_op("1番を前面に") == (1, "focus")
+    assert intents.window_op("4番を右のモニターへ移して") == (4, "next_monitor")
+    assert intents.window_op("3番") is None          # 番号だけは前面に出す操作（解析では None）
+    assert intents.window_op("左半分に") is None      # 番号が無い
+    assert intents.window_op("3番をなんかして") is None
+
+
+def test_layout_entries_filter():
+    """配置の保存対象：自分自身・小さすぎる窓・無題窓を除き、アプリ名を切り出す。"""
+    items = [
+        ("ZCode — voicectl", "zcode.exe", (0, 0, 1200, 800)),
+        ("", "explorer.exe", (0, 0, 800, 600)),                # 無題は除外
+        ("Program Manager", "explorer.exe", (0, 0, 800, 600)),  # デスクトップは除外
+        ("付箋", "pythonw.exe", (0, 0, 400, 300)),              # 自分自身は除外
+        ("小さい窓", "test.exe", (0, 0, 100, 80)),              # 小さすぎは除外
+        ("無題 - メモ帳", "notepad.exe", (100, 100, 700, 600)),
+    ]
+    out = intents.layout_entries(items)
+    assert len(out) == 2
+    assert out[0]["app"] == "ZCode — voicectl"[:24] and out[0]["rect"] == [0, 0, 1200, 800]
+    assert out[1]["app"] == "メモ帳"   # 「無題 - メモ帳」の末尾がアプリ名になる
+
+
+def test_state_layouts_store(tmp_path, monkeypatch):
+    """声で保存した配置の保存と読み込み（同名は config より優先される前提のデータを作る）。"""
+    f = tmp_path / "layouts.json"
+    monkeypatch.setattr(intents, "STATE_LAYOUTS", f)
+    intents.save_state_layouts({"作業": [{"app": "ZCode", "title": "ZCode", "rect": [0, 0, 800, 600]}]})
+    back = intents.load_state_layouts()
+    assert back["作業"][0]["rect"] == [0, 0, 800, 600]
+
+
 def test_routine_fuzzy_reading():
     """「さぎょうかいし」のようにかなで認識されても、読みが同じなら同じルーチン。"""
     r = {"作業開始": ["a"]}

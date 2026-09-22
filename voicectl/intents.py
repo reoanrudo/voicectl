@@ -110,7 +110,8 @@ def parse(text: str, routines: dict | None = None, layouts: dict | None = None) 
         return None
     if re.fullmatch(r"(何|なに|なん)(が|を)?(できる|出来る|できます)(の|か|？|\?)*|できること(を)?(教えて|見せて)?|使い方(を)?(教えて)?|ヘルプ", c):
         return Intent("help")
-    for fn in (_p_glide, _p_explorer, _p_demo, _p_dictation, _p_routine_admin, _p_power, _p_settings, _p_alarm, _p_volume,
+    for fn in (_p_glide, _p_explorer, _p_windows_list, _p_layout_save, _p_layout_del, _p_demo, _p_dictation,
+               _p_routine_admin, _p_power, _p_settings, _p_alarm, _p_volume,
                _p_app_volume, _p_proc, _p_taskbar, _p_proc_kill, _p_tab, _p_seek, _p_find, _p_file, _p_arrange,
                _p_named_window, _p_paste_to, _p_time, _p_calc, _p_timer, _p_read, _p_shot, _p_read_later, _p_sel_search,
                _p_line, _p_memo, _p_download, _p_zip, _p_checksum, _p_ai):
@@ -994,14 +995,94 @@ def _p_read_later(c: str) -> Intent | None:
     return None
 
 
+# ---- 窓の一覧と配置の音声保存（このアプリらしい操作。ヒント番号と layouts を循環させる）----
+def _p_windows_list(c: str) -> Intent | None:
+    if re.fullmatch(r"(窓|ウィンドウ|まど)(の)?(一覧|リスト)(を)?(見せて|みせて|教えて|出して)?", c):
+        return Intent("windows_list")
+    return None
+
+
+_WIN_OP_WORDS = [
+    ("閉じて", "close"), ("とじて", "close"), ("最小化", "minimize"), ("しまって", "minimize"),
+    ("最大化", "maximize"), ("前面", "focus"), ("手前に", "focus"), ("開いて", "focus"),
+    ("左半分", "left_half"), ("右半分", "right_half"), ("上半分", "upper_half"), ("下半分", "lower_half"),
+    ("中央", "center"), ("作業領域いっぱい", "full"), ("左のモニター", "prev_monitor"), ("右のモニター", "next_monitor"),
+]
+
+
+def window_op(text: str) -> tuple[int, str] | None:
+    """「3番を左半分に」「2番を閉じて」→ (番号, 操作)。窓一覧の番号操作に使う。"""
+    c = textparse.compact(text)
+    m = re.fullmatch(r"(.+?)番?(を)?(.+)", c)
+    if not m:
+        return None
+    n = to_int(m.group(1))
+    if n is None:
+        return None
+    v = m.group(3)
+    for w, op in _WIN_OP_WORDS:
+        if re.fullmatch(re.escape(w) + r"(に|へ)?(して|寄せて|移して|移動して|表示)?(ください)?", v):
+            return (n, op)
+    return None
+
+
+def _p_layout_save(c: str) -> Intent | None:
+    m = re.fullmatch(r"(今の|この)?(配置|レイアウト)を(?P<name>.{1,12}?)(として|に|で)保存(して)?", c)
+    if m and m.group("name").strip():
+        return Intent("layout_save", {"name": m.group("name").strip()})
+    return None
+
+
+def _p_layout_del(c: str) -> Intent | None:
+    m = re.fullmatch(r"(?P<name>.{1,12}?)の?配置を?(消して|削除して|削除)", c)
+    if m and m.group("name").strip() not in ("", "今の", "この"):
+        return Intent("layout_del", {"name": m.group("name").strip()})
+    return None
+
+
+STATE_LAYOUTS = Path(__file__).resolve().parent.parent / "state" / "layouts.json"
+
+
+def load_state_layouts() -> dict[str, list[dict]]:
+    """声で保存した配置（state/layouts.json）。同名なら config.yaml の layouts より優先される。"""
+    try:
+        if STATE_LAYOUTS.exists():
+            return {str(k): list(v) for k, v in json.loads(STATE_LAYOUTS.read_text(encoding="utf-8")).items()}
+    except Exception:
+        log.exception("保存した配置を読めませんでした")
+    return {}
+
+
+def save_state_layouts(d: dict[str, list[dict]]) -> None:
+    STATE_LAYOUTS.parent.mkdir(exist_ok=True)
+    STATE_LAYOUTS.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def layout_entries(items: list[tuple[str, str, tuple[int, int, int, int]]]) -> list[dict]:
+    """開いている窓 (タイトル, プロセス, 矩形) から、配置の保存対象だけを切り出す（最大 9 窓）。"""
+    out = []
+    for title, process, rect in items:
+        if not title or title == "Program Manager":
+            continue
+        if process.lower() in ("pythonw.exe", "python.exe"):
+            continue   # 自分自身の表示は記録しない
+        l, t, r, b = rect
+        if r - l < 200 or b - t < 150:
+            continue   # ツールチップのような小さな窓は除外
+        app = title.split(" - ")[-1].strip() or process.replace(".exe", "")
+        out.append({"app": app[:24], "title": title[:40], "rect": [l, t, r, b]})
+    return out[:9]
+
+
 HELP = [
     "アプリ・サイト：「〇〇開いて」「YouTubeで〇〇」「〇〇を検索」",
     "画面：「〇〇押して」「番号表示」「下にスクロール」「3回戻って」「行を選んで」「画面を撮ってコピー」",
-    "窓：「左にChrome右にObsidian」「Chromeを上Obsidianを下に並べて」「開発の配置」「上半分に」「常に手前に」",
+    "窓：「窓一覧」→「3番を左半分に」「2番を閉じて」「左にChrome右にObsidian」「開発の配置」",
+    "配置の保存：「今の配置を〇〇として保存」→「〇〇の配置」で再現、「〇〇の配置を消して」",
     "数値：「音量30」「Chromeの音量だけ30」「3番目のタブ」「10秒戻して」「5分後に知らせて」",
     "ファイル：「〇〇というファイル開いて」「これをzipに」「zipを展開して」「チェックサム見せて」「Cドライブ開いて」",
     "文字：「〇〇と入力」「書き取り開始」「選択したところ読んで」「これで検索して」",
-    "メモ：「メモっておいて〇〇」「メモ見せて」「メモ読んで」",
+    "メモ：「メモっておいて〇〇」「メモ見せて」「メモ読んで」「後で読む」→「後で読むリスト」",
     "覚える：「〇〇の手順を記録して」〜「記録終了」「〇〇と言ったら△△して」「これ覚えて」",
     "AI：「〇〇のメールを書いて」「これを英語にして」「この画面を要約して」「〇〇って何？」「今日何した？」",
 ]

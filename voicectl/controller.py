@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import candidates, followup, textparse, winutil
+from . import candidates, followup, intents, textparse, winutil
 from .config import ROOT, Config
 from .context import ContextCollector, Snapshot
 from .engines.base import DecisionEngine
@@ -222,8 +222,9 @@ class Controller:
         from . import intents
         self.speaker = intents.Speaker(bool(cfg.get("voice_reply.enabled", True)), int(cfg.get("voice_reply.rate", 1)))
         self.routines = intents.load_routines(cfg.get("routines", {}))
-        # 配置のひな形（config の layouts。「開発の配置」など）
-        self.layouts = {str(k): v for k, v in (cfg.get("layouts") or {}).items()}
+        # 配置のひな形（config の layouts ＋ 声で保存したもの。「開発の配置」「今の配置を〇〇として保存」）
+        self.layouts_state = intents.load_state_layouts()
+        self.layouts = {**{str(k): v for k, v in (cfg.get("layouts") or {}).items()}, **self.layouts_state}
         self._dictating = False     # 書き取りモード中（話した内容をそのまま入力する）
         self._pending_proc_kill: tuple[int, str, float] | None = None   # プロセス強制終了の確認待ち
         self._last_proc_top: list = []   # 直前に見せた重いプロセスの一覧（「1番を止めて」用）
@@ -1456,6 +1457,12 @@ class Controller:
                 self._reply(f"後で読む {len(lines)} 件", shown or ["まだありません。ブラウザで「後で読む」"], secs=8.0)
             elif k == "layout":
                 self._run_layout(a["name"], heard)
+            elif k == "windows_list":
+                self._show_windows_list(heard)
+            elif k == "layout_save":
+                self._layout_save(a["name"], heard)
+            elif k == "layout_del":
+                self._layout_del(a["name"], heard)
             elif k == "layout_list":
                 names = [f"{n}（{len(v) if isinstance(v, list) else '?'} 窓）" for n, v in self.layouts.items()]
                 self._reply(f"配置 {len(names)} 種", names[:6] or ["config.yaml の layouts に登録できます"], secs=8.0)
@@ -1886,7 +1893,6 @@ class Controller:
             if not isinstance(e, dict):
                 continue
             app_name = str(e.get("app", "")).strip()
-            place = str(e.get("place", "full")).strip()
             if not app_name:
                 continue
             w = intents.find_window(app_name)
@@ -1899,21 +1905,72 @@ class Controller:
             if w is None:
                 self._reply(f"「{app_name}」のウィンドウが見つかりません", [heard], state="retry")
                 return
-            placed.append((w, place, app_name))
+            placed.append((w, e, app_name))
         if not placed:
             self._reply("その配置には窓の指定がありません", [heard], state="retry")
             return
         from .schema import SNAP_RECTS
-        for w, place, _n in placed:
-            if place in ("maximize", "screen_wide"):
+        for w, e, _n in placed:
+            rect = e.get("rect")
+            name_key = str(e.get("place", "full")).strip()
+            if rect:
+                intents.place(w.hwnd, tuple(rect))   # 声で保存した配置は窓の位置をそのまま再現する
+            elif name_key in ("maximize", "screen_wide"):
                 winutil.window_command(w.hwnd, "maximize")
-            elif place in SNAP_RECTS:
-                winutil.place_rect(w.hwnd, place)
+            elif name_key in SNAP_RECTS:
+                winutil.place_rect(w.hwnd, name_key)
             else:
-                log.warning("配置の場所が不明: %s", place)
+                log.warning("配置の場所が不明: %s", name_key)
         winutil.focus_window(placed[-1][0].hwnd)
         self._reply(f"{name} の配置にしました（{len(placed)} 窓）",
-                    [f"{n[:16]} → {p}" for _w, p, n in placed[:3]], secs=6.0)
+                    [f"{n[:16]} → {str(e.get('place', e.get('rect', '位置')))[:18]}" for _w, e, n in placed[:3]], secs=6.0)
+
+    def _layout_save(self, name: str, heard: str) -> None:
+        """今開いている窓の位置を、名前つきの配置として保存する（声だけで layouts を作れる）。"""
+        entries = intents.layout_entries([(w.title, w.process, w.rect) for w in winutil.list_windows()])
+        if not entries:
+            self._reply("保存できる窓がありません", [heard], state="retry")
+            return
+        state = intents.load_state_layouts()
+        state[name] = entries
+        intents.save_state_layouts(state)
+        self.layouts_state = state
+        self.layouts = {**{str(k): v for k, v in (self.cfg.get("layouts") or {}).items()}, **state}
+        self._reply(f"{name} の配置を保存しました（{len(entries)} 窓）",
+                    [f"{e['app'][:16]}" for e in entries[:4]] + [f"「{name} の配置」で再現します"], secs=8.0)
+
+    def _layout_del(self, name: str, heard: str) -> None:
+        state = intents.load_state_layouts()
+        if name not in state:
+            self._reply(f"「{name}」の保存した配置はありません", ["config.yaml の layouts は設定で消してください"], state="retry")
+            return
+        del state[name]
+        intents.save_state_layouts(state)
+        self.layouts_state = state
+        self.layouts = {**{str(k): v for k, v in (self.cfg.get("layouts") or {}).items()}, **state}
+        self._reply(f"{name} の配置を消しました", [heard])
+
+    def _show_windows_list(self, heard: str) -> None:
+        """開いている窓に番号を振って表示する。「3番を左半分に」「2番を閉じて」で続けて操作できる。"""
+        wins = []
+        for w in winutil.list_windows():
+            if not w.title or w.title == "Program Manager":
+                continue
+            if w.process.lower() in ("pythonw.exe", "python.exe"):
+                continue
+            l, t, r, b = w.rect
+            if r - l < 200 or b - t < 150:
+                continue
+            wins.append(w)
+        wins = wins[:9]
+        if not wins:
+            self._reply("操作できる窓がありません", [heard], state="retry")
+            return
+        items = {i + 1: ((w.rect[0] + w.rect[2]) // 2, (w.rect[1] + w.rect[3]) // 2) for i, w in enumerate(wins)}
+        self.hints = {"mode": "windows", "items": items, "wins": wins}
+        self.ui.hints_labels.emit(list(items.items()))
+        self._reply(f"窓 {len(wins)} 個", [f"{i + 1}. {w.title[:26]}" for i, w in enumerate(wins)]
+                    + ["「3番を左半分に」「2番を閉じて」で続けられます / 「ストップ」で終了"], secs=0.0)
 
     def _start_timer(self, sec: int, text: str) -> None:
         import threading
@@ -2805,6 +2862,34 @@ class Controller:
             if kd.action == "show_hints" and kd.params.get("hint_mode") == "grid":
                 self.hints = None
                 self._show_hints("grid", Snapshot(None, winutil.get_cursor()))
+                return True
+            return False
+        if h["mode"] == "windows":
+            # 窓一覧モード：「3番を左半分に」「2番を閉じて」と番号で続けて操作できる（ヒントは継続）
+            from . import intents as _intents
+            from .schema import SNAP_RECTS
+            wins = h["wins"]
+            op = _intents.window_op(text)
+            if op and 1 <= op[0] <= len(wins):
+                num, act = op
+                w = wins[num - 1]
+                if act in ("close", "minimize", "maximize"):
+                    winutil.window_command(w.hwnd, act)
+                elif act == "focus":
+                    winutil.focus_window(w.hwnd)
+                elif act in SNAP_RECTS:
+                    winutil.place_rect(w.hwnd, act)
+                label = {"close": "閉じました", "minimize": "最小化しました", "maximize": "最大化しました",
+                         "focus": "前面に出しました"}.get(act, "配置しました")
+                self.ui.status.emit("done", f"{num} 番の {w.title[:20]} を{label}",
+                                    ["続けられます / 「ストップ」で終了"], 2.0)
+                self.ui.transcript_result.emit(f"{num} 番 → {label}")
+                return True
+            if n is not None and 1 <= n <= len(wins):
+                winutil.focus_window(wins[n - 1].hwnd)
+                self.ui.status.emit("done", f"{n} 番を前面に",
+                                    [wins[n - 1].title[:26], "続けられます / 「ストップ」で終了"], 2.0)
+                self.ui.transcript_result.emit(f"{n} 番を前面に")
                 return True
             return False
         # グリッド：番号で絞り込み、「クリック」で決定
