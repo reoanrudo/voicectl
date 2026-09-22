@@ -41,6 +41,14 @@ def test_stop_yes_no():
     assert not textparse.is_yes("いいえ")
 
 
+def test_is_denial():
+    """裸の否定。確認待ち以外で「違う」と言われたときの取り消し表示に使う。"""
+    for t in ("違う", "違います", "ちがう。", "そうじゃないね"):
+        assert textparse.is_denial(t), t
+    for t in ("違うと言いました", "メモ帳開いて", "いいえ"):
+        assert not textparse.is_denial(t), t
+
+
 # ---- キーワードエンジン ----
 def _snap():
     win = WindowInfo(1, "無題 - メモ帳", "notepad.exe", (0, 0, 1000, 800))

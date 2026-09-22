@@ -40,6 +40,12 @@ def is_no(text: str) -> bool:
     return _exact_or_short(text, _NO, 4)
 
 
+def is_denial(text: str) -> bool:
+    """裸の否定（「違う」「違います」「そうじゃない」）。確認待ち以外で言われたときの取り消し表示に使う。"""
+    c = compact(text).lower()
+    return bool(re.fullmatch(r"(違う|違います|ちがう|ちがいます|そうじゃない|そうではない)(よ|ね)?", c))
+
+
 # ---- 番号 ----
 _KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _KANA_NUM = [  # 長いものから照合

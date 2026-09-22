@@ -749,6 +749,17 @@ class Controller:
             self.hints = None
             self.ui.hints_clear.emit()
 
+        # 裸の否定（「違う」「違います」）：確認も候補もないときは、取り消しの意思表示として静かに受ける
+        if not (self.pending or self.pending_plan) and textparse.is_denial(text):
+            self.context.collect(budget_sec=0)
+            if self._last_pending is not None:
+                self._last_pending = None
+                self._reply("取り消しました", [f"聞き取り：{text}"], secs=2.0)
+            else:
+                self.ui.status.emit("idle", "待機中", [f"聞き取り：{text}", "直前に確認はありません"], 2.5)
+                self.ui.transcript_result.emit(f"聞き取り：{text}（直前に確認はありません）")
+            return
+
         # 直前の操作の続き（「続き」「さっきのページ」「さっきのアプリ」）は決まった処理で済ませる
         if self._handle_followup(text):
             self.context.collect(budget_sec=0)
