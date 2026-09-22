@@ -261,7 +261,7 @@ def open_terminal_here(folder: str) -> None:
 
 
 # ---- タスクバー（Win11 のアプリボタン。スタートとタスクビューは数えない）----
-_TASKBAR_SKIP = ("スタート", "タスク ビュー", "タスクビュー")
+_TASKBAR_SKIP = ("スタート", "タスク ビュー", "タスクビュー", "start", "task view")
 
 
 def _taskbar_buttons():
@@ -278,7 +278,7 @@ def _taskbar_buttons():
             return
         try:
             if c.ControlTypeName == "ButtonControl" and c.Name and not c.IsOffscreen \
-                    and c.Name not in _TASKBAR_SKIP:
+                    and c.Name.lower() not in _TASKBAR_SKIP:
                 btns.append(c)
         except Exception:
             return
@@ -294,8 +294,11 @@ def _taskbar_buttons():
     return btns
 
 
-def taskbar_click(n: int, name: str = "") -> str:
-    """タスクバーの n 番目（または名前に含まれる言葉が一致する）ボタンを押して、名前を返す。"""
+def taskbar_click(n: int, name: str = "", dry_run: bool = False) -> str:
+    """タスクバーの n 番目（または名前に含まれる言葉が一致する）ボタンを押して、名前を返す。
+
+    dry_run=True のときは押さずに「名前@x,y」を返す（実験と座標の確認用）。
+    """
     import time as _time
     from . import winutil
     btns = _taskbar_buttons()
@@ -310,7 +313,10 @@ def taskbar_click(n: int, name: str = "") -> str:
         target = btns[n - 1]
     label = (target.Name or "?")[:24]
     r = target.BoundingRectangle
-    winutil.set_cursor((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+    cx, cy = (r.left + r.right) // 2, (r.top + r.bottom) // 2
+    if dry_run:
+        return f"{label}@{cx},{cy}"
+    winutil.set_cursor(cx, cy)
     _time.sleep(0.03)
     winutil.click("left")
     return label
