@@ -230,6 +230,54 @@ def test_app_volume_match():
     assert not intents.app_volume_match("VLC", "chrome.exe")
 
 
+# ---- 2026-09-22 追加（10 回目）：タスクバー・後で読む・プロセス停止・拡大鏡 ----
+@pytest.mark.parametrize("text,kind,args", [
+    ("タスクバーの3番目", "taskbar_click", {"n": 3, "name": ""}),
+    ("タスクバーの2をクリック", "taskbar_click", {"n": 2, "name": ""}),
+    ("タスクバーのBrave", "taskbar_click", {"n": 0, "name": "Brave"}),
+    ("後で読む", "read_later", {}),
+    ("このページを後で読む", "read_later", {}),
+    ("後で読むリスト", "read_later_list", {}),
+    ("1番を止めて", "proc_kill", {"n": 1}),
+    ("3番目のプロセスを終了して", "proc_kill", {"n": 3}),
+])
+def test_parse_phase_c(text, kind, args):
+    it = intents.parse(text)
+    assert it is not None and it.kind == kind, text
+    assert it.args == args, text
+
+
+@pytest.mark.parametrize("text", ["5番", "タスクバーの30番目", "後で読むページを開いて", "8番を止めて"])
+def test_phase_c_rejections(text):
+    assert intents.parse(text) is None, text
+
+
+def test_read_later_store(tmp_path, monkeypatch):
+    """後で読みの追記と一覧（state/read_later.txt を一時ファイルに差し替えて確認）。"""
+    f = tmp_path / "read_later.txt"
+    monkeypatch.setattr(intents, "READ_LATER", f)
+    intents.read_later_add("記事のタイトル", "https://example.com/a")
+    intents.read_later_add("", "example.org/b")
+    lines = intents.read_later_lines()
+    assert len(lines) == 2
+    assert "記事のタイトル" in lines[0] and "https://example.com/a" in lines[0]
+    assert "example.org/b" in lines[1]   # タイトルが無いときは URL だけで入る
+
+
+def test_kill_process_guard():
+    """PID の再利用などで名前が変わっていたら止めない（自分自身を別名で止めようとして拒否）。"""
+    import os
+    with pytest.raises(ValueError):
+        intents.kill_process(os.getpid(), "notepad.exe")
+
+
+def test_process_name_matches():
+    assert intents.process_name_matches("chrome.exe", "chrome")
+    assert intents.process_name_matches("Code", "code")
+    assert intents.process_name_matches("", "notepad")     # 名前が読めないときは変化なしとして続行
+    assert not intents.process_name_matches("explorer.exe", "notepad")
+
+
 def test_routine_fuzzy_reading():
     """「さぎょうかいし」のようにかなで認識されても、読みが同じなら同じルーチン。"""
     r = {"作業開始": ["a"]}

@@ -43,6 +43,9 @@ _KEY_WORDS = {
     "次のウィンドウ": "next_window", "次の窓": "next_window", "前のウィンドウ": "prev_window", "前の窓": "prev_window",
     "画面を撮って": "screenshot_save", "全画面を撮って": "screenshot_save", "丸ごと撮って": "screenshot_save",
     "画面を切り取って": "screenshot", "切り取って": "screenshot",
+    "画面を拡大": "magnify_in", "画面を拡大して": "magnify_in",
+    "画面を縮小": "magnify_out", "画面を縮小して": "magnify_out",
+    "拡大鏡": "magnify_in", "拡大鏡を出して": "magnify_in",
     # ここから下は 2026-09-22 に追加（よく使うのに言えなかった操作）
     "アドレスバー": "address_bar", "urlバー": "address_bar", "ユーアールエル": "address_bar",
     "ブックマーク": "bookmark", "お気に入りに追加": "bookmark", "ブックマークに追加": "bookmark",
@@ -114,11 +117,12 @@ class KeywordEngine(DecisionEngine):
     def decide(self, text: str, snap: Snapshot, lookup: Lookup, previous: Decision | None,
                facts: dict | None = None, recent: list | None = None, session: dict | None = None) -> Decision:
         c = textparse.compact(text)
-        d = self._match(c, text, lookup, previous)
+        d = self._match(c, text, lookup, previous, facts)
         d.engine = "keyword"
         return d
 
-    def _match(self, c: str, raw: str, lookup: Lookup, previous: Decision | None) -> Decision:
+    def _match(self, c: str, raw: str, lookup: Lookup, previous: Decision | None,
+               facts: dict | None = None) -> Decision:
         def D(action, conf, **params):
             return Decision(action=action, params=params, confidence=conf)
 
@@ -247,9 +251,15 @@ class KeywordEngine(DecisionEngine):
 
         # キー操作（「タブ閉じて」のように助詞を省いた言い方も許す）
         c_no_wa = c.replace("を", "")
+        kind = ((facts or {}).get("windows") or {}).get("window_kind", "")
         for w, key in sorted(_KEY_WORDS.items(), key=lambda kv: -len(kv[0])):
             if re.fullmatch(re.escape(w) + _POLITE, c, flags=re.I) or \
                     re.fullmatch(re.escape(w.replace("を", "")) + _POLITE, c_no_wa, flags=re.I):
+                # ターミナルでは Ctrl+C が処理の中断になるため、コピー/貼り付けを差し替える
+                if kind == "terminal" and key == "copy":
+                    key = "copy_term"
+                elif kind == "terminal" and key == "paste":
+                    key = "paste_term"
                 return D("key_combo", 0.95, key=key)
         for w, act in sorted(_WIN_WORDS.items(), key=lambda kv: -len(kv[0])):
             if re.fullmatch(re.escape(w) + _POLITE, c) or \

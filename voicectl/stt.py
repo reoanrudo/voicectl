@@ -96,16 +96,45 @@ def find_gpu_index(name_part: str) -> int:
     return 0
 
 
+def pick_device(device_setting: str, gpu_name: str) -> tuple[str, str, int | None]:
+    """使うデバイスを決める。(device, compute_type, CUDA に見せる GPU 番号か None)。
+
+    device_setting: "auto"（指定 GPU があれば使い、なければ CPU）| "cpu" | "gpu"
+    """
+    if device_setting != "cpu":
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            for i in range(pynvml.nvmlDeviceGetCount()):
+                n = pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(i))
+                n = n.decode() if isinstance(n, bytes) else n
+                if gpu_name.lower() in n.lower():
+                    log.info("STT は GPU %d (%s) を使用", i, n)
+                    return ("cuda", "int8_float16", i)
+        except Exception:
+            log.exception("GPU の列挙に失敗")
+        if device_setting == "gpu":
+            log.warning("'%s' を含む GPU が見つからないため GPU 0 を使用します", gpu_name)
+            return ("cuda", "int8_float16", 0)
+    log.info("STT は CPU で動作します（応答は数秒かかることがあります）")
+    return ("cpu", "int8", None)
+
+
 class SpeechRecognizer:
     def __init__(self, model: str = "large-v3-turbo", gpu_name: str = "4080", compute_type: str = "float16",
-                 language: str = "ja", beam_size: int = 1, extra_vocab: list[str] | None = None):
+                 language: str = "ja", beam_size: int = 1, extra_vocab: list[str] | None = None,
+                 device_setting: str = "auto"):
         os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")  # nvml と番号を揃える
         # 使う GPU だけを CUDA に見せる。ほかの GPU（PCIe が不安定な 3060 など）には CUDA の処理を一切載せない
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(find_gpu_index(gpu_name))
+        dev, ctype, gpu_index = pick_device(device_setting, gpu_name)
+        if dev == "cuda" and gpu_index is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
         _setup_cuda_dlls()
         from faster_whisper import WhisperModel
         t0 = time.perf_counter()
-        self.model = WhisperModel(model, device="cuda", device_index=0, compute_type=compute_type)
+        self.model = WhisperModel(model, device=dev, device_index=0, compute_type=ctype)
         self.language = language
         self.beam_size = beam_size
         self._lock = threading.Lock()

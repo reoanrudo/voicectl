@@ -118,6 +118,18 @@ def test_keyword_fast_without_lookup():
     assert d.action == "mouse_move"
 
 
+def test_keyword_terminal_copy(monkeypatch):
+    """ターミナルではコピー/貼り付けが Shift 付きのキーに変わる（Ctrl+C の中断防止）。"""
+    snap = _snap()
+    eng = KeywordEngine()
+    d = eng.decide("コピーして", snap, {}, None, facts={"windows": {"window_kind": "terminal"}})
+    assert d.action == "key_combo" and d.params.get("key") == "copy_term"
+    d = eng.decide("貼り付け", snap, {}, None, facts={"windows": {"window_kind": "terminal"}})
+    assert d.params.get("key") == "paste_term"
+    d = eng.decide("コピーして", snap, {}, None)   # ふだんは Ctrl+C のまま
+    assert d.params.get("key") == "copy"
+
+
 def test_partial_reuse_condition():
     """話している最中の認識を確定に使える条件（最新で、追加音声 0.5 秒以内）だけを検査する。"""
     from voicectl.controller import Controller

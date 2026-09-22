@@ -111,9 +111,9 @@ def parse(text: str, routines: dict | None = None, layouts: dict | None = None) 
     if re.fullmatch(r"(何|なに|なん)(が|を)?(できる|出来る|できます)(の|か|？|\?)*|できること(を)?(教えて|見せて)?|使い方(を)?(教えて)?|ヘルプ", c):
         return Intent("help")
     for fn in (_p_glide, _p_explorer, _p_demo, _p_dictation, _p_routine_admin, _p_power, _p_settings, _p_alarm, _p_volume,
-               _p_app_volume, _p_proc, _p_tab, _p_seek, _p_find, _p_file, _p_arrange,
-               _p_named_window, _p_paste_to, _p_time, _p_calc, _p_timer, _p_read, _p_shot, _p_sel_search, _p_line, _p_memo,
-               _p_download, _p_zip, _p_checksum, _p_ai):
+               _p_app_volume, _p_proc, _p_taskbar, _p_proc_kill, _p_tab, _p_seek, _p_find, _p_file, _p_arrange,
+               _p_named_window, _p_paste_to, _p_time, _p_calc, _p_timer, _p_read, _p_shot, _p_read_later, _p_sel_search,
+               _p_line, _p_memo, _p_download, _p_zip, _p_checksum, _p_ai):
         it = fn(c)
         if it is not None:
             return it
@@ -893,8 +893,8 @@ def _p_proc(c: str) -> Intent | None:
     return None
 
 
-def proc_top(by: str = "memory") -> list[tuple[str, int]]:
-    """メモリ（または CPU）をたくさん使っているプロセスの上位 5 件を (名前, 値) で返す。"""
+def proc_top(by: str = "memory") -> list[tuple[str, int, int]]:
+    """メモリ（または CPU）をたくさん使っているプロセスの上位 5 件を (名前, 値, PID) で返す。"""
     import psutil
     rows = []
     if by == "cpu":
@@ -908,7 +908,7 @@ def proc_top(by: str = "memory") -> list[tuple[str, int]]:
             try:
                 v = p.cpu_percent(None)
                 if v > 1.0:
-                    rows.append((p.info["name"] or "?", int(v)))
+                    rows.append((p.info["name"] or "?", int(v), p.pid))
             except Exception:
                 continue
     else:
@@ -916,11 +916,82 @@ def proc_top(by: str = "memory") -> list[tuple[str, int]]:
             try:
                 mi = p.info["memory_info"]
                 if mi and mi.rss >= 80 * 1024 * 1024:
-                    rows.append((p.info["name"] or "?", int(mi.rss // (1024 * 1024))))
+                    rows.append((p.info["name"] or "?", int(mi.rss // (1024 * 1024)), p.pid))
             except Exception:
                 continue
     rows.sort(key=lambda x: -x[1])
     return rows[:5]
+
+
+def process_name_matches(actual: str, expected: str) -> bool:
+    """プロセス名の一致判定（.exe を除いて比べる。空のときは変化なしとみなす）。"""
+    a = (actual or "").lower().replace(".exe", "")
+    e = (expected or "").lower().replace(".exe", "")
+    return not a or a == e or (len(e) >= 3 and e in a)
+
+
+def kill_process(pid: int, name: str) -> None:
+    """プロセスを強制終了する。名前が変わっていたら（PID の再利用）中止する。"""
+    import psutil
+    p = psutil.Process(pid)
+    if not process_name_matches(p.name() or "", name):
+        raise ValueError(f"プロセスの名前が変わっています（{p.name()}）")
+    p.kill()
+    p.wait(timeout=3)
+
+
+def _p_proc_kill(c: str) -> Intent | None:
+    """「1番を止めて」：直前に見せた重いプロセスの一覧の n 番を止める（確認あり）。"""
+    m = re.fullmatch(r"(?P<n>" + _NUM + r")(番|番目|ばんめ|つ目)?(の)?(プロセス|やつ)?を?(止めて|とめて|終了して|殺して|切って)(ください)?", c)
+    if m:
+        n = to_int(m.group("n"))
+        if n is None or not 1 <= n <= 5:
+            return None
+        return Intent("proc_kill", {"n": n})
+    return None
+
+
+# ---- タスクバー（Win11 のアプリボタン）----
+def _p_taskbar(c: str) -> Intent | None:
+    m = re.fullmatch(r"タスクバー(の|から)?(?P<t>" + _NUM + r")(番目|ばんめ|つ目)?(を)?"
+                     r"(押して|クリック|開いて|出して|切り替え|切り替えて)?(してください)?", c)
+    if m and (m.group(5) or not re.search(r"[0-9０-９]", c) or c.rstrip("してください").endswith(("番目", "ばんめ", "つ目"))):
+        n = to_int(m.group("t"))
+        if n is None or not 1 <= n <= 20:
+            return None
+        return Intent("taskbar_click", {"n": n, "name": ""})
+    m = re.fullmatch(r"タスクバー(の)?(?P<name>[^、。]{2,16}?)(を)?(押して|クリック|開いて|出して|切り替えて?)?(してください)?", c)
+    if m and m.group("name"):
+        return Intent("taskbar_click", {"n": 0, "name": m.group("name")})
+    return None
+
+
+# ---- 後で読む（ブラウザの URL を取って state/read_later.txt に積む）----
+READ_LATER = Path(__file__).resolve().parent.parent / "state" / "read_later.txt"
+
+
+def read_later_add(title: str, url: str) -> str:
+    READ_LATER.parent.mkdir(exist_ok=True)
+    ts = time.strftime("%m-%d %H:%M")
+    safe = (title or "").replace("\t", " ").strip()[:60]
+    with READ_LATER.open("a", encoding="utf-8") as f:
+        f.write(f"{ts}\t{safe}\t{url}\n")
+    return ts
+
+
+def read_later_lines() -> list[str]:
+    if not READ_LATER.exists():
+        return []
+    return [ln for ln in READ_LATER.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def _p_read_later(c: str) -> Intent | None:
+    if re.fullmatch(r"(あとで|後で)読む(リスト|一覧)(を)?(見せて|みせて|教えて|確認して)?", c):
+        return Intent("read_later_list")
+    if re.fullmatch(r"((この|今の|今開いてる)(ページ|記事|サイト)(を)?|これ(を)?)?(あとで|後で)読む"
+                    r"(リストに)?(追加して|いれて|入れて)?", c):
+        return Intent("read_later")
+    return None
 
 
 HELP = [

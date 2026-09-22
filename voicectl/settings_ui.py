@@ -48,6 +48,30 @@ def parse_roots(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"[;、,]", text or "") if p.strip()]
 
 
+def setx_api_key(key: str) -> str | None:
+    """環境変数 TYPESAFE_API_KEY をユーザー環境変数に登録する。成功は None、失敗はエラー文。"""
+    import subprocess
+    try:
+        subprocess.run(["setx", "TYPESAFE_API_KEY", key], check=True, capture_output=True)
+        return None
+    except Exception as e:
+        log.warning("API キーの環境変数登録に失敗")
+        return str(e)[:80]
+
+
+def has_api_key() -> bool:
+    """API キーが（プロセスの環境かユーザー環境変数に）あるか。値は見ない。"""
+    import os
+    if os.environ.get("TYPESAFE_API_KEY"):
+        return True
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            return bool(winreg.QueryValueEx(k, "TYPESAFE_API_KEY")[0])
+    except OSError:
+        return False
+
+
 def apply_changes(raw: dict, changes: list[tuple[str, object]]) -> dict:
     """(ドット区切りパス, 値) のリストを設定辞書に反映する（足りない階層は作る）。"""
     for dotted, value in changes:
@@ -86,6 +110,183 @@ def probe_level(device_spec) -> float:
     sd.wait()
     time.sleep(0.05)
     return float(np.sqrt(np.mean(rec ** 2)))
+
+
+def open_wizard(cfg, ctl, on_restart) -> None:
+    """初回セットアップのウィザードを開く（すでに開いていれば手前に出す）。"""
+    global _wizard
+    try:
+        if _wizard is not None and _wizard.isVisible():
+            _wizard.raise_()
+            _wizard.activateWindow()
+            return
+    except RuntimeError:
+        _wizard = None
+    _wizard = SetupWizard(cfg, ctl, on_restart)
+    _wizard.show()
+
+
+_wizard = None
+
+
+class SetupWizard:
+    """初回セットアップ（QWizard）。マイク→キー→API キー→GPU の確認→完了。"""
+
+    def __init__(self, cfg, ctl, on_restart):
+        from PySide6.QtWidgets import QWizard
+        self.cfg, self.ctl, self.on_restart = cfg, ctl, on_restart
+        self.w = QWizard()
+        self.w.setWindowTitle("voicectl 初回セットアップ")
+        self.w.addPage(self._p_welcome())
+        self.w.addPage(self._p_mic())
+        self.w.addPage(self._p_keys())
+        self.w.addPage(self._p_api())
+        self.w.addPage(self._p_gpu())
+        self.w.addPage(self._p_done())
+        self.w.resize(620, 460)
+
+    def _p_welcome(self):
+        from PySide6.QtWidgets import QLabel, QWizardPage, QVBoxLayout
+        p = QWizardPage()
+        p.setTitle("voicectl へようこそ")
+        v = QVBoxLayout(p)
+        for t in ("F5 を押している間に話すと、PC を声で操作できます。",
+                  "この画面でマイク・キー・API キーを確かめます（あとからトレイの「設定」で変えられます）。",
+                  "※ 一部の機能は Jev の API キー（TYPESAFE_API_KEY）が必要です。"):
+            lab = QLabel(t)
+            lab.setWordWrap(True)
+            v.addWidget(lab)
+        return p
+
+    def _p_mic(self):
+        from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWizardPage
+        p = QWizardPage()
+        p.setTitle("マイク")
+        v = QVBoxLayout(p)
+        self.mic = QComboBox()
+        for value, label in _device_choices():
+            self.mic.addItem(label, value)
+        cur = self.cfg.get("audio.device")
+        i = self.mic.findData(cur if cur else None)
+        self.mic.setCurrentIndex(max(0, i))
+        v.addWidget(QLabel("使うマイクを選んで「テスト」を押し、話してみてください。"))
+        h = QHBoxLayout()
+        h.addWidget(self.mic, 1)
+        self.mic_test = QPushButton("テスト")
+        self.mic_test.clicked.connect(self._test_mic)
+        h.addWidget(self.mic_test)
+        v.addLayout(h)
+        self.mic_label = QLabel("")
+        self.mic_label.setWordWrap(True)
+        v.addWidget(self.mic_label)
+        return p
+
+    def _test_mic(self):
+        from PySide6.QtWidgets import QApplication
+        self.mic_test.setEnabled(False)
+        self.mic_label.setText("録音中…（1.2 秒）")
+        QApplication.processEvents()
+        try:
+            lvl = probe_level(self.mic.currentData())
+            self.mic_label.setText(f"レベル {lvl:.3f} — " + ("声が届いています" if lvl >= 0.005
+                                else "音がほとんど入っていません（別のマイクを選んでください）"))
+        except Exception as e:
+            self.mic_label.setText(f"録音できませんでした: {str(e)[:60]}")
+        finally:
+            self.mic_test.setEnabled(True)
+
+    def _p_keys(self):
+        from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWizardPage
+        from .keys import KEY_VK
+        p = QWizardPage()
+        p.setTitle("話しかけるキー")
+        v = QVBoxLayout(p)
+        self.ptt = QComboBox()
+        self.ptt.addItems(sorted(KEY_VK))
+        self.ptt.setCurrentText(str(self.cfg.get("hotkeys.push_to_talk", "f5")))
+        v.addWidget(QLabel("押している間だけ聞き取るキー"))
+        v.addWidget(self.ptt)
+        self.stop = QComboBox()
+        self.stop.addItems(sorted(KEY_VK))
+        self.stop.setCurrentText(str(self.cfg.get("hotkeys.emergency_stop", "pause")))
+        v.addWidget(QLabel("緊急停止キー（すべて止めます）"))
+        v.addWidget(self.stop)
+        return p
+
+    def _p_api(self):
+        from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWizardPage
+        p = QWizardPage()
+        p.setTitle("Jev の API キー")
+        v = QVBoxLayout(p)
+        v.addWidget(QLabel("TYPESAFE_API_KEY を貼り付けてください（表示は隠れます。ファイルやログには書きません）。"))
+        self.api = QLineEdit()
+        self.api.setEchoMode(QLineEdit.Password)
+        v.addWidget(self.api)
+        v.addWidget(QLabel("※ なくても起動しますが、判定の一部（Jev）と文章アシスタントが使えません。"))
+        v.addStretch(1)
+        return p
+
+    def _p_gpu(self):
+        from PySide6.QtWidgets import QLabel, QVBoxLayout, QWizardPage
+        p = QWizardPage()
+        p.setTitle("音声認識の確認")
+        v = QVBoxLayout(p)
+        name = ""
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            i = 0
+            while True:
+                try:
+                    h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                except Exception:
+                    break
+                n = pynvml.nvmlDeviceGetName(h)
+                name += (n.decode() if isinstance(n, bytes) else n) + " / "
+                i += 1
+                if i > 8:
+                    break
+        except Exception:
+            name = ""
+        want = str(self.cfg.get("stt.gpu_name", "4080"))
+        if want.lower() in name.lower():
+            v.addWidget(QLabel(f"GPU「{want}」が見つかりました。音声認識はこの GPU で速く動きます。"))
+        elif name:
+            v.addWidget(QLabel(f"GPU: {name.strip(' / ')}\n指定の「{want}」は見つかりませんでした。"
+                               "設定の stt.gpu_name を変えると GPU を使えます（なければ CPU で動きます）。"))
+        else:
+            v.addWidget(QLabel("NVIDIA GPU が見つかりません。音声認識は CPU で動きます（応答が数秒かかることがあります）。"))
+        self.gpu_text = name
+        v.addStretch(1)
+        return p
+
+    def _p_done(self):
+        from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWizardPage
+        p = QWizardPage()
+        p.setTitle("完了")
+        v = QVBoxLayout(p)
+        v.addWidget(QLabel("設定を保存します。「F5 を押しながら話してください」と画面に出たら準備完了です。"))
+        self.restart_cb = QCheckBox("保存して voicectl を再起動する（おすすめ）")
+        self.restart_cb.setChecked(True)
+        v.addWidget(self.restart_cb)
+        v.addWidget(QLabel("詳しい言い方は README.md、あとからの変更はトレイの「設定」で。"))
+        v.addStretch(1)
+        return p
+
+    def _finish(self):
+        changes = [
+            ("hotkeys.push_to_talk", self.ptt.currentText()),
+            ("hotkeys.emergency_stop", self.stop.currentText()),
+            ("audio.device", self.mic.currentData()),
+        ]
+        apply_changes(self.cfg.raw, changes)
+        key = self.api.text().strip()
+        if key:
+            setx_api_key(key)
+        self.cfg.save()
+        log.info("初回セットアップを完了しました")
+        if self.restart_cb.isChecked() and self.on_restart:
+            self.on_restart()
 
 
 def open_settings(cfg, ctl, on_restart) -> None:
@@ -389,16 +590,16 @@ class SettingsDialog:
             self.mic_test.setEnabled(True)
 
     def _set_api_key(self):
-        from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         key = self.api.text().strip()
         if not key:
             QMessageBox.information(self.d, "voicectl", "キーを入力してください")
             return
-        try:
-            subprocess.run(["setx", "TYPESAFE_API_KEY", key], check=True, capture_output=True)
+        err = setx_api_key(key)
+        if err:
+            QMessageBox.warning(self.d, "voicectl", f"登録できませんでした: {err}")
+        else:
             QMessageBox.information(self.d, "voicectl", "環境変数に登録しました。voicectl の再起動後に使えます。")
-        except Exception as e:
-            QMessageBox.warning(self.d, "voicectl", f"登録できませんでした: {str(e)[:60]}")
 
     def _collect(self):
         from PySide6.QtWidgets import QComboBox, QTableWidgetItem

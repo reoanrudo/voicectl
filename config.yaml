@@ -47,6 +47,7 @@ audio:
 
 stt:
   model: large-v3-turbo
+  device: auto                  # auto（指定 GPU があれば使い無ければ CPU）| gpu | cpu
   gpu_name: "4080"              # この名前を含む GPU だけを使う。3060 は PCIe の BusReset でクラッシュの起点になったため使わない（2026-09-22）
   compute_type: int8_float16   # float16 と同精度で約1割速い（実測）
   language: ja
@@ -210,6 +211,7 @@ transcript:
   enabled: true                 # 右下（状態表示の上）に表示
   live_partial: true            # 話している最中も約1秒ごとに途中経過を表示（確定が最大で約0.3秒遅れることがある）
   partial_as_final: true        # 途中経過がほぼ全体をカバーしていれば、離したときの再認識を省く（初動が約0.35秒速くなる）
+  predict: true                 # 話している最中に、確定できそうな操作を「→ 〜」で先に表示する
   partial_interval_sec: 1.0
   font_px: 18
   width_ratio: 0                # 画面幅に対するバーの幅。0 で状態表示と同じ幅

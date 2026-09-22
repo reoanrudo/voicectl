@@ -259,3 +259,92 @@ def open_terminal_here(folder: str) -> None:
         subprocess.Popen(["cmd", "/c", "start", "powershell", "-NoExit", "-Command", f"Set-Location '{folder}'"],
                          creationflags=0x08000000)
 
+
+# ---- タスクバー（Win11 のアプリボタン。スタートとタスクビューは数えない）----
+_TASKBAR_SKIP = ("スタート", "タスク ビュー", "タスクビュー")
+
+
+def _taskbar_buttons():
+    import uiautomation as auto
+    import win32gui
+    hwnd = win32gui.FindWindow("Shell_TrayWnd", None)
+    if not hwnd:
+        raise ValueError("タスクバーが見つかりません")
+    win = auto.ControlFromHandle(hwnd)
+    btns: list = []
+
+    def walk(c, d):
+        if d > 14 or len(btns) > 60:
+            return
+        try:
+            if c.ControlTypeName == "ButtonControl" and c.Name and not c.IsOffscreen \
+                    and c.Name not in _TASKBAR_SKIP:
+                btns.append(c)
+        except Exception:
+            return
+        try:
+            for ch in c.GetChildren():
+                walk(ch, d + 1)
+        except Exception:
+            pass
+
+    walk(win, 0)
+    if not btns:
+        raise ValueError("タスクバーのボタンが読めません")
+    return btns
+
+
+def taskbar_click(n: int, name: str = "") -> str:
+    """タスクバーの n 番目（または名前に含まれる言葉が一致する）ボタンを押して、名前を返す。"""
+    import time as _time
+    from . import winutil
+    btns = _taskbar_buttons()
+    if name:
+        nm = name.lower()
+        target = next((b for b in btns if nm in (b.Name or "").lower()), None)
+        if target is None:
+            raise ValueError(f"タスクバーに「{name}」がありません")
+    else:
+        if not 1 <= n <= len(btns):
+            raise ValueError(f"タスクバーの {n} 番目はありません（{len(btns)} 個）")
+        target = btns[n - 1]
+    label = (target.Name or "?")[:24]
+    r = target.BoundingRectangle
+    winutil.set_cursor((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+    _time.sleep(0.03)
+    winutil.click("left")
+    return label
+
+
+# ---- ブラウザの URL（後で読む用）----
+def browser_url(fg) -> str | None:
+    """前面のブラウザの URL を UIA で読む（アドレスバーの値。取れなければ None）。"""
+    import uiautomation as auto
+    win = auto.ControlFromHandle(fg.hwnd)
+    out: list[str] = []
+
+    def walk(c, d):
+        if d > 16 or out:
+            return
+        try:
+            if c.ControlTypeName == "EditControl" and not c.IsOffscreen:
+                try:
+                    v = (c.GetValuePattern().Value or "").strip()
+                except Exception:
+                    v = ""
+                if v and " " not in v and ("." in v or v.startswith("http")):
+                    out.append(v)
+        except Exception:
+            return
+        try:
+            for ch in c.GetChildren():
+                walk(ch, d + 1)
+        except Exception:
+            pass
+
+    walk(win, 0)
+    if not out:
+        return None
+    v = out[0]
+    return v if v.startswith("http") else "https://" + v
+

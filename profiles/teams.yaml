@@ -1,0 +1,33 @@
+# Microsoft Teams（ms-teams.exe / teams.exe）用プロファイル
+# 会議中のマイク・カメラ・手挙げを音声で操作する（Teams 既定のショートカット）
+name: Teams
+
+match:
+  exe: [ms-teams, teams]
+
+vocabulary:
+  - ミュート
+  - 手を挙げる
+  - ブレイクアウト
+
+commands:
+  ミュートの切り替え:
+    say: [ミュート, 消音, ミュート解除, マイク切って, マイクつけて]
+    do:
+      - keys: "Ctrl+Shift+m"
+  カメラの切り替え:
+    say: [カメラ切って, カメラつけて, カメラ, ビデオ切って]
+    do:
+      - keys: "Ctrl+Shift+o"
+  手を挙げる:
+    say: [手を挙げて, 手を下ろして, 挙手]
+    do:
+      - keys: "Ctrl+Shift+k"
+  録画の開始と停止:
+    say: [録画して, 録画終了]
+    do:
+      - keys: "Ctrl+Shift+e"
+  バーを表示:
+    say: [バーを出して, ツールバー]
+    do:
+      - keys: "Ctrl+Shift+j"

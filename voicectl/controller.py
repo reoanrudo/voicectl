@@ -225,6 +225,8 @@ class Controller:
         # 配置のひな形（config の layouts。「開発の配置」など）
         self.layouts = {str(k): v for k, v in (cfg.get("layouts") or {}).items()}
         self._dictating = False     # 書き取りモード中（話した内容をそのまま入力する）
+        self._pending_proc_kill: tuple[int, str, float] | None = None   # プロセス強制終了の確認待ち
+        self._last_proc_top: list = []   # 直前に見せた重いプロセスの一覧（「1番を止めて」用）
         self._last_partial: tuple[str, float, int] | None = None   # 途中経過の最後の認識（文, 時刻, 音声の長さ）
         self._wake_session = False  # ウェイクワードで始まった聞き取りセッション（無音で自動終了）
         self._wake_idle_sec = 12.0  # セッション中、何秒無音が続いたら待機に戻るか
@@ -437,6 +439,16 @@ class Controller:
             if self._listening and text:
                 self._last_partial = (text, time.monotonic(), len(audio))
                 self.ui.transcript_partial.emit(text)
+                # 話している最中に、確定できそうな操作を先に表示する（予測バー）
+                if self.cfg.get("transcript.predict", True):
+                    try:
+                        win0 = winutil.foreground_window()
+                        snap0 = Snapshot(win0, winutil.get_cursor(), [], [])
+                        pd = self.keyword.decide(text, snap0, {}, None)
+                        if fast_path(pd) and pd.action not in ("stop", "show_hints", "repeat"):
+                            self.ui.status.emit("listening", "聞き取り中…", [f"→ {pd.describe({})}"], 0.0)
+                    except Exception:
+                        pass
 
     def _segment_loop(self) -> None:
         """聞き取り中、発話の終わり（無音 silence_sec 秒）を見つけたら、そこまでを 1 つの命令として処理に回す。"""
@@ -487,6 +499,20 @@ class Controller:
         if self._wake_session and self._listening and time.monotonic() - self._wake_last > self._wake_idle_sec:
             log.info("ウェイクワードの聞き取りを無音で終了")
             self._end_listening()
+
+    @staticmethod
+    def _screen_has(noun: str, lookup: candidates.Lookup) -> bool:
+        """名前で指したものが画面の候補に近いものを持つか（聞き返しの「ありません」表示の判定）。"""
+        from . import textparse
+        n = textparse.compact(noun)
+        if len(n) < 2:
+            return True   # 短すぎて判断できないときは余計なことを言わない
+        for kind in ("element", "menu"):
+            for cand in (lookup.get(kind) or {}).values():
+                name = cand.data.name if kind == "element" else cand.data.path[-1]
+                if textparse.similarity(n, name) >= 0.6:
+                    return True
+        return False
 
     @staticmethod
     def _can_reuse_partial(p: tuple[str, float, int] | None, audio_len: int, now: float) -> bool:
@@ -684,6 +710,23 @@ class Controller:
             if textparse.is_no(text) or textparse.is_stop(text):
                 self.context.collect(budget_sec=0)
                 return
+        # プロセス強制終了の確認への返事。「はい」以外はすべて取り消し
+        pk = getattr(self, "_pending_proc_kill", None)
+        if pk is not None:
+            self._pending_proc_kill = None
+            if time.monotonic() - pk[2] < 10 and textparse.is_yes(text):
+                self.context.collect(budget_sec=0)
+                try:
+                    from . import intents
+                    intents.kill_process(pk[0], pk[1])
+                    self._reply(f"{pk[1][:24]} を終了しました", [])
+                except Exception as e:
+                    self._reply("終了できませんでした", [str(e)[:50]], state="retry")
+                return
+            self.ui.status.emit("idle", "取り消しました", [], 2.0)
+            if textparse.is_no(text) or textparse.is_stop(text):
+                self.context.collect(budget_sec=0)
+                return
         # 確認待ちへの返事
         if self.pending or self.pending_plan:
             self.pending_plan = None   # 新しい命令が来たら plan の確認も取り消す
@@ -794,8 +837,11 @@ class Controller:
             win0 = winutil.foreground_window()
             snap0 = Snapshot(win0, winutil.get_cursor(), winutil.list_windows(), [])
             kd = self.keyword.decide(text, snap0, {}, self.previous)
+            # ターミナルでのコピー/貼り付けは Ctrl+C 中断の危険があるため、状況を見てから判定する
+            terminal = bool(win0 and win0.process.lower() in ("windowsterminal.exe", "conhost.exe"))
             if fast_path(kd) and kd.action not in ("stop", "show_hints") \
-                    and not (kd.action == "key_combo" and _FAST_VERB.search(textparse.compact(text))):
+                    and not (kd.action == "key_combo" and _FAST_VERB.search(textparse.compact(text))) \
+                    and not (terminal and kd.params.get("key") in ("copy", "paste")):
                 kd.engine = "keyword(即実行)"
                 log.info("画面を見ずに即実行: %s → %s", text, kd.action)
                 self._act(kd, {}, text, snap0, stt_ms)
@@ -825,7 +871,17 @@ class Controller:
 
     def _decide(self, text: str, snap: Snapshot, lookup: candidates.Lookup) -> Decision:
         self._last_facts = {}
-        kd = self.keyword.decide(text, snap, lookup, self.previous)
+        # ターミナルではコピー/貼り付けの意味が変わるため、キーワード判定の前に窓の種類だけ確かめる
+        kind = ""
+        try:
+            from . import winctx as _winctx
+            wc = self.context.win_context(snap.window, timeout=0.6)
+            if isinstance(wc, _winctx.WinContext):
+                kind = wc.kind
+        except Exception:
+            kind = ""
+        kd = self.keyword.decide(text, snap, lookup, self.previous,
+                                 facts={"windows": {"window_kind": kind}} if kind else None)
         if self.engine is None or (self.cfg.get("decision.fast_path", True) and fast_path(kd)
                                    and not _names_on_screen(text, kd, lookup)):
             return kd
@@ -1349,8 +1405,44 @@ class Controller:
                 if not rows:
                     self._reply("目立って重いプロセスはありません", [heard])
                     return
+                self._last_proc_top = rows   # 「1番を止めて」用（確認してから止める）
                 unit = "MB" if a.get("by", "memory") == "memory" else "%"
-                self._reply(f"重いプロセス トップ {len(rows)}", [f"{n[:22]} {v}{unit}" for n, v in rows], secs=12.0)
+                self._reply(f"重いプロセス トップ {len(rows)}",
+                            [f"{i + 1}. {n[:20]} {v}{unit}" for i, (n, v, _pid) in enumerate(rows)], secs=12.0)
+            elif k == "proc_kill":
+                rows = getattr(self, "_last_proc_top", [])
+                n = int(a["n"])
+                if not rows or not 1 <= n <= len(rows):
+                    self._reply("止める対象がありません", ["先に「メモリ食ってるの見せて」で一覧を出してください"], state="retry")
+                    return
+                name, _v, pid = rows[n - 1]
+                self._pending_proc_kill = (pid, name, time.monotonic())
+                self._reply(f"{n} 番の {name[:24]} を強制終了しますか？",
+                            ["「はい」で実行（10 秒以内）", "ほかの言葉で取り消し"],
+                            state="confirm", speak=f"{name}を強制終了しますか", secs=10.0)
+            elif k == "taskbar_click":
+                from . import uiaction, winctx
+                label = uiaction.run_isolated(winctx.taskbar_click, int(a["n"]), str(a.get("name", "")), timeout=4.0)
+                self._reply(f"タスクバーの {label} を押しました", [heard])
+            elif k == "read_later":
+                from . import uiaction, winctx
+                fg = winutil.foreground_window()
+                url = title = None
+                if fg and fg.process.lower() in intents._BROWSER_PROCS:
+                    url = uiaction.run_isolated(winctx.browser_url, fg, timeout=3.0)
+                    title = fg.title
+                if not url:
+                    url = self.session.get("last_url")
+                    title = self.session.get("last_site", "")
+                if not url:
+                    self._reply("読むページが見つかりません", ["ブラウザでページを開いてから言ってください"], state="retry")
+                    return
+                intents.read_later_add(title or "", url)
+                self._reply("後で読むに追加しました", [(title or url)[:44], "「後で読むリスト」で見られます"], secs=5.0)
+            elif k == "read_later_list":
+                lines = intents.read_later_lines()
+                shown = [ln.split("\t", 1)[-1].replace("\t", "｜")[:52] for ln in lines[-5:]][::-1]
+                self._reply(f"後で読む {len(lines)} 件", shown or ["まだありません。ブラウザで「後で読む」"], secs=8.0)
             elif k == "layout":
                 self._run_layout(a["name"], heard)
             elif k == "layout_list":
@@ -2141,8 +2233,11 @@ class Controller:
             self._run_agent(text)  # 1 手では決まらない目的 → Jev に 1 手ずつ選ばせて進める
             return
         if d.action == "unknown" or d.confidence < self.th_confirm:
-            self.ui.status.emit("retry", "もう一度お願いします", [heard, meta], 4.0)
-            self.ui.transcript_result.emit("聞き返し（判定できませんでした）")
+            # 名前で指したのに画面に無いときは、それと伝える（黙って失敗しない）
+            noun = _noun(text)
+            extra = [] if not noun or self._screen_has(noun, lookup) else [f"「{noun}」は画面にありません"]
+            self.ui.status.emit("retry", "もう一度お願いします", [heard] + extra + [meta], 4.0)
+            self.ui.transcript_result.emit("聞き返し（判定できませんでした）" + (f"（{extra[0]}）" if extra else ""))
             self._remember("（判定できず）", "not_understood")
             return
         if d.action == "show_hints":
@@ -2247,7 +2342,7 @@ class Controller:
     _GLOBAL_KEYS = {"volume_up", "volume_down", "mute", "media_play_pause", "media_next", "media_prev", "start_menu",
                     "task_view", "alt_tab", "screenshot", "ime_toggle", "lock_pc", "task_manager", "win_explorer",
                     "clipboard_history", "desktop_next", "desktop_prev", "desktop_new",
-                    "next_window", "prev_window", "screenshot_save"}
+                    "next_window", "prev_window", "screenshot_save", "magnify_in", "magnify_out"}
 
     def _check_window(self, d: Decision, retry_wait: float = 0.8) -> None:
         """判定したときの前面ウィンドウと違えば中止する。ただしウィンドウの切り替わりは一瞬遅れることが

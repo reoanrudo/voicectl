@@ -12,6 +12,40 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PATH = ROOT / "config.yaml"
 
 _HEADER = "# voicectl 設定ファイル（トレイの「設定」からも編集できます。変更の反映には再起動が必要）\n"
+_VERSION = 1   # 設定の形式の版。上げるときは migrate() に移行処理を足す
+
+
+def migrate(raw: dict) -> dict:
+    """旧い設定に足りない項目を埋めて version をそろえる（ユーザーが設定した値は上書きしない）。"""
+    if not isinstance(raw, dict):
+        return raw
+    try:
+        ver = int(raw.get("version") or 0)
+    except (TypeError, ValueError):
+        ver = 0
+    if ver >= _VERSION:
+        raw["version"] = _VERSION
+        return raw
+    section_defaults = {
+        "alarm": {"use_clock_app": True},
+        "wake_word": {"enabled": False},
+        "voice_reply": {"enabled": False},
+    }
+    for key, dflt in section_defaults.items():
+        node = raw.get(key)
+        if node is None:
+            raw[key] = dict(dflt)
+        elif isinstance(node, dict):
+            for k, v in dflt.items():
+                node.setdefault(k, v)
+    if raw.get("transcript") is None:
+        raw["transcript"] = {}
+    if isinstance(raw["transcript"], dict):
+        raw["transcript"].setdefault("partial_as_final", True)
+    if raw.get("layouts") is None:
+        raw["layouts"] = {}
+    raw["version"] = _VERSION
+    return raw
 
 
 @dataclass
@@ -67,4 +101,4 @@ def dictionary(cfg: Config) -> dict[str, str]:
 def load(path: Path | None = None) -> Config:
     p = path or DEFAULT_PATH
     with open(p, encoding="utf-8") as f:
-        return Config(yaml.safe_load(f) or {}, p)
+        return Config(migrate(yaml.safe_load(f) or {}), p)

@@ -144,6 +144,11 @@ KEYS: dict[str, tuple[str, list[int]]] = {
     "prev_window": ("Switch to the previous window / 前のウィンドウ", [0x12, 0x10, 0x1B]),
     "screenshot_save": ("Save a full-screen screenshot (Win+PrtScn) / 画面を丸ごと撮って保存",
                         [0x5B, 0x2C]),
+    "magnify_in": ("Magnifier zoom in (Win+Plus) / 画面を拡大", [0x5B, 0xBB]),
+    "magnify_out": ("Magnifier zoom out (Win+Minus) / 画面を縮小", [0x5B, 0xBD]),
+    # ターミナル（Windows Terminal）では Ctrl+C が処理の中断になるため、コピーは Shift を足す
+    "copy_term": ("Copy in terminal (Ctrl+Shift+C) / ターミナルでコピー", [0x11, 0x10, 0x43]),
+    "paste_term": ("Paste in terminal (Ctrl+Shift+V) / ターミナルで貼り付け", [0x11, 0x10, 0x56]),
 }
 
 WINDOW_ACTIONS: dict[str, str] = {

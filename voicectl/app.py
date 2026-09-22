@@ -162,7 +162,8 @@ def main() -> int:
                    + [a for als in (cfg.get("app_aliases", {}) or {}).values() for a in als])
     stt = SpeechRecognizer(cfg.get("stt.model", "large-v3-turbo"), str(cfg.get("stt.gpu_name", "4080")),
                            cfg.get("stt.compute_type", "float16"), cfg.get("stt.language", "ja"),
-                           int(cfg.get("stt.beam_size", 1)), extra_vocab)
+                           int(cfg.get("stt.beam_size", 1)), extra_vocab,
+                           str(cfg.get("stt.device", "auto")))
     mic_error = None
     try:
         recorder = Recorder(cfg.get("audio.device"))
@@ -198,7 +199,7 @@ def main() -> int:
 
     # ---- トレイ ----
     # トレイのアイコン：画面のオーブと同じオーロラの球に、白いマイク
-    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtCore import QPointF, Qt, QTimer
     from PySide6.QtGui import QPen, QRadialGradient
     from .overlay import _aurora_gradient
     pm = QPixmap(64, 64)
@@ -253,6 +254,17 @@ def main() -> int:
 
     menu.addAction("設定", _open_settings)
 
+    def _open_wizard():
+        from .settings_ui import open_wizard
+
+        def restart():
+            os.startfile(str(ROOT / "run.bat"))
+            qapp.quit()
+
+        open_wizard(cfg, ctl, restart)
+
+    menu.addAction("初回セットアップ", _open_wizard)
+
     def _show_learning():
         ctl.show_learning()
 
@@ -285,6 +297,11 @@ def main() -> int:
             lines.insert(0, f"「{DEFAULT_WORDS[0]}」と声をかけても開始します")
         status.set_status("idle", "待機中", lines + [f"判定: {mode}"], 6.0)
     log.info("起動完了（判定: %s、マイク: %s）", mode, "なし" if mic_error else "あり")
+
+    # API キーがまだ無いときは、初回セットアップのウィザードを一度だけ開く
+    from .settings_ui import has_api_key
+    if not has_api_key():
+        QTimer.singleShot(1200, _open_wizard)
 
     code = qapp.exec()
     hook.stop()
